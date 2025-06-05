@@ -28,11 +28,7 @@ export class AuthController {
     return this.authService.findAll();
   }
 
-  @UseGuards(AuthGuard)
-  @Get('store/:storeId')
-  getUsersByStore(@Param('storeId') storeId: string) {
-    return this.authService.getUsersByStore(storeId);
-  }
+ 
 
   @UseGuards(AuthGuard)
   @Get(':id')
