@@ -1,87 +1,57 @@
-import { IsString, IsEmail, IsEnum, IsOptional, MinLength, IsDate, IsNumber, IsObject, ValidateNested, IsUUID } from 'class-validator';
-import { Type } from 'class-transformer';
-import { UserRole, AuthProvider } from '@prisma/client';
+import { IsEmail, IsString, MinLength, IsOptional, IsEnum, IsBoolean } from "class-validator"
+import { UserRole, AuthProvider } from "./create-auth.dto"
 
 export class UpdateUserDto {
+  @IsOptional()
   @IsEmail()
-  @IsOptional()
-  email?: string;
-
-  @IsString()
-  @IsOptional()
-  @MinLength(6, { message: 'La contraseña debe tener al menos 6 caracteres' })
-  password?: string;
-
-  @IsString()
-  @IsOptional()
-  @MinLength(6, { message: 'La nueva contraseña debe tener al menos 6 caracteres' })
-  newPassword?: string;
+  email?: string
 
   @IsOptional()
   @IsString()
-  firstName?: string;
+  @MinLength(6)
+  password?: string
 
   @IsOptional()
   @IsString()
-  lastName?: string;
+  @MinLength(6)
+  newPassword?: string
+
+  @IsOptional()
+  @IsString()
+  firstName?: string
+
+  @IsOptional()
+  @IsString()
+  lastName?: string
 
   @IsOptional()
   @IsEnum(UserRole)
-  role?: UserRole;
+  role?: UserRole
 
   @IsOptional()
   @IsString()
-  image?: string;
+  phone?: string
 
   @IsOptional()
   @IsString()
-  phone?: string;
+  image?: string
 
   @IsOptional()
   @IsString()
-  bio?: string;
-
-  @IsOptional()
-  @IsObject()
-  preferences?: Record<string, any>;
+  bio?: string
 
   @IsOptional()
   @IsEnum(AuthProvider)
-  authProvider?: AuthProvider;
+  authProvider?: AuthProvider
 
   @IsOptional()
   @IsString()
-  authProviderId?: string;
+  companyId?: string
 
   @IsOptional()
-  @IsString()
-  accessToken?: string;
+  @IsBoolean()
+  isActive?: boolean
 
   @IsOptional()
-  @IsString()
-  refreshToken?: string;
-
-  @IsOptional()
-  @IsDate()
-  @Type(() => Date)
-  tokenExpiresAt?: Date;
-
-  @IsOptional()
-  @IsDate()
-  @Type(() => Date)
-  emailVerified?: Date;
-
-  @IsOptional()
-  @IsDate()
-  @Type(() => Date)
-  lastLogin?: Date;
-
-  @IsOptional()
-  @IsNumber()
-  failedLoginAttempts?: number;
-
-  @IsOptional()
-  @IsDate()
-  @Type(() => Date)
-  lockedUntil?: Date;
+  preferences?: any
 }

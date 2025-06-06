@@ -1,37 +1,54 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from "class-validator"
-import { UserRole, AuthProvider } from "@prisma/client"
-import { IsEnum } from "class-validator"
+import { IsEmail, IsString, MinLength, IsOptional, IsEnum } from "class-validator"
+
+export enum UserRole {
+  SUPERADMIN = "SUPERADMIN",
+  ADMIN = "ADMIN",
+  MANAGER = "MANAGER",
+  EDITOR = "EDITOR",
+  VIEWER = "VIEWER",
+}
+
+export enum AuthProvider {
+  EMAIL = "EMAIL",
+  GOOGLE = "GOOGLE",
+  MICROSOFT = "MICROSOFT",
+}
 
 export class CreateAuthDto {
-  @IsNotEmpty()
-  @IsString()
-  firstName: string
-
-  @IsNotEmpty()
-  @IsString()
-  lastName: string
-
-  @IsNotEmpty()
   @IsEmail()
   email: string
 
-  @IsNotEmpty()
   @IsString()
   @MinLength(6)
   password: string
+
+  @IsString()
+  firstName: string
+
+  @IsString()
+  lastName: string
+
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole = UserRole.VIEWER
 
   @IsOptional()
   @IsString()
   phone?: string
 
   @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole = UserRole.EDITOR
+  @IsString()
+  image?: string
+
+  @IsOptional()
+  @IsString()
+  bio?: string
 
   @IsOptional()
   @IsEnum(AuthProvider)
   authProvider?: AuthProvider = AuthProvider.EMAIL
+
   @IsOptional()
   @IsString()
-  storeId?: string;
+  companyId?: string
 }
