@@ -28,7 +28,6 @@ export class AuthController {
     return this.authService.findAll();
   }
 
- 
 
   @UseGuards(AuthGuard)
   @Get(':id')

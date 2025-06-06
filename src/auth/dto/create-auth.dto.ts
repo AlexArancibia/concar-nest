@@ -26,7 +26,7 @@ export class CreateAuthDto {
 
   @IsOptional()
   @IsEnum(UserRole)
-  role?: UserRole = UserRole.CUSTOMER_SERVICE
+  role?: UserRole = UserRole.EDITOR
 
   @IsOptional()
   @IsEnum(AuthProvider)

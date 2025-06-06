@@ -7,6 +7,15 @@ import { FILE_UPLOADS_DIR } from "lib/constants"
 import { ServeStaticModule } from "@nestjs/serve-static"
 import { ConfigModule } from "@nestjs/config"
 import { EmailModule } from "./email/email.module"
+import { DocumentsModule } from './documents/documents.module';
+import { ExpensesModule } from './expenses/expenses.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
+import { BankAccountsModule } from "./bank-accounts/bank-accounts.module"
+import { CompaniesModule } from "./companies/companies.module"
+import { AuditLogsModule } from "./audit-logs/audit-logs.module"
+import { ConciliationsModule } from "./conciliations/conciliations.module"
+import { TransactionsModule } from "./transactions/transactions.module"
+import { SystemConfigModule } from "./system-config/system-config.module"
  
 
 @Module({
@@ -29,6 +38,15 @@ import { EmailModule } from "./email/email.module"
       envFilePath: ".env",
     }),
     EmailModule,
+    DocumentsModule,
+    BankAccountsModule,
+    AuditLogsModule,
+    ConciliationsModule,
+    TransactionsModule,
+    SystemConfigModule,
+    CompaniesModule,
+    ExpensesModule,
+    SuppliersModule,
   ],
 })
 export class AppModule {}
