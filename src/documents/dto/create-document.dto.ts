@@ -7,6 +7,7 @@ import {
   IsBoolean,
   IsArray,
   ValidateNested,
+  IsNumber,
 } from "class-validator"
 import { Type, Transform } from "class-transformer"
 import { DocumentType, DocumentStatus } from "@prisma/client"
@@ -128,6 +129,11 @@ export class CreateDocumentLineDto {
   @IsOptional()
   @IsString()
   xmlLineData?: string
+
+  // Campos adicionales que vienen del XML - permitir que el frontend los envíe
+  @IsOptional()
+  @IsNumber()
+  lineNumber?: number
 }
 
 export class CreateDocumentDto {
@@ -414,6 +420,41 @@ export class CreateDocumentDto {
   @IsNotEmpty()
   @IsString()
   createdById: string
+
+  // Campos calculados que vienen del XML - permitir que el frontend los envíe
+  @IsOptional()
+  @IsString()
+  fullNumber?: string
+
+  @IsOptional()
+  @Transform(({ value }) => Number.parseFloat(value))
+  netPayableAmount?: number
+
+  @IsOptional()
+  @Transform(({ value }) => Number.parseFloat(value))
+  conciliatedAmount?: number
+
+  @IsOptional()
+  @Transform(({ value }) => Number.parseFloat(value))
+  pendingAmount?: number
+
+  // SUNAT fields - permitir que vengan del XML si existen
+  @IsOptional()
+  @IsString()
+  sunatResponseCode?: string
+
+  @IsOptional()
+  @IsString()
+  cdrStatus?: string
+
+  @IsOptional()
+  @IsDateString()
+  sunatProcessDate?: string
+
+  // Audit fields
+  @IsOptional()
+  @IsString()
+  updatedById?: string
 
   // Document lines
   @IsOptional()

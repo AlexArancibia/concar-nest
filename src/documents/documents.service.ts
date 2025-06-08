@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException } from "@nestjs/common"
-import  { PrismaService } from "../prisma/prisma.service" // Adjust path as needed
-import  { CreateDocumentDto } from "./dto/create-document.dto"
-import  { UpdateDocumentDto } from "./dto/update-document.dto"
-import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
+import { PrismaService } from "../prisma/prisma.service" // Adjust path as needed
+import { CreateDocumentDto } from "./dto/create-document.dto"
+import { UpdateDocumentDto } from "./dto/update-document.dto"
+import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
 import { DocumentStatus, DocumentType, Prisma } from "@prisma/client"
 import * as crypto from "crypto"
 
@@ -61,8 +61,8 @@ export class DocumentsService {
   async createDocument(createDocumentDto: CreateDocumentDto) {
     const { lines, ...documentData } = createDocumentDto
 
-    // Generate full number
-    const fullNumber = `${documentData.series}-${documentData.number}`
+    // Si no viene fullNumber del frontend, lo generamos
+    const fullNumber = documentData.fullNumber || `${documentData.series}-${documentData.number}`
 
     // Check for duplicates
     const existingDocument = await this.prisma.document.findUnique({
@@ -79,40 +79,54 @@ export class DocumentsService {
       throw new ConflictException(`Document ${fullNumber} already exists`)
     }
 
-    // Calculate amounts
-    const netPayableAmount = this.calculateNetPayableAmount(
-      documentData.total,
-      documentData.retentionAmount || 0,
-      documentData.detractionAmount || 0,
-    )
+    // Si no vienen los campos calculados del frontend, los calculamos
+    const netPayableAmount =
+      documentData.netPayableAmount ??
+      this.calculateNetPayableAmount(
+        documentData.total,
+        documentData.retentionAmount || 0,
+        documentData.detractionAmount || 0,
+      )
 
-    const pendingAmount = netPayableAmount
+    const conciliatedAmount = documentData.conciliatedAmount ?? 0
+    const pendingAmount = documentData.pendingAmount ?? netPayableAmount
 
-    // Generate XML hash if XML content is provided
-    let xmlHash: string | undefined
-    if (documentData.xmlContent) {
+    // Si no viene xmlHash del frontend, lo generamos
+    let xmlHash: string | undefined = documentData.xmlHash
+    if (!xmlHash && documentData.xmlContent) {
       xmlHash = crypto.createHash("sha256").update(documentData.xmlContent).digest("hex")
     }
 
     try {
       const document = await this.prisma.document.create({
         data: {
+          // Usar todos los datos del DTO tal como vienen
           ...documentData,
+
+          // Solo sobrescribir si no vienen del frontend
           fullNumber,
           netPayableAmount,
+          conciliatedAmount,
           pendingAmount,
           xmlHash,
+
+          // Date conversions
           issueDate: new Date(documentData.issueDate),
           dueDate: documentData.dueDate ? new Date(documentData.dueDate) : null,
           receptionDate: documentData.receptionDate ? new Date(documentData.receptionDate) : null,
           creditDueDate: documentData.creditDueDate ? new Date(documentData.creditDueDate) : null,
           installmentDueDate: documentData.installmentDueDate ? new Date(documentData.installmentDueDate) : null,
           signatureDate: documentData.signatureDate ? new Date(documentData.signatureDate) : null,
+          sunatProcessDate: documentData.sunatProcessDate ? new Date(documentData.sunatProcessDate) : null,
+
+          // Document lines - usar tal como vienen del frontend
           lines: lines
             ? {
                 create: lines.map((line, index) => ({
+                  // Usar todos los campos del line tal como vienen
                   ...line,
-                  lineNumber: index + 1,
+                  // Solo generar lineNumber si no viene del frontend
+                  lineNumber: line.lineNumber ?? index + 1,
                 })),
               }
             : undefined,
@@ -127,7 +141,9 @@ export class DocumentsService {
               email: true,
             },
           },
-          lines: true,
+          lines: {
+            orderBy: { lineNumber: "asc" },
+          },
         },
       })
 
