@@ -511,6 +511,7 @@ model Transaction {
   conciliationItems ConciliationItem[]
   
   @@unique([bankAccountId, operationNumber, transactionDate,balance]) // Evitar duplicados
+  @@unique([transactionHash]) // Hash único
   @@index([companyId, bankAccountId])
   @@index([companyId, transactionDate])
   @@index([companyId, status])
