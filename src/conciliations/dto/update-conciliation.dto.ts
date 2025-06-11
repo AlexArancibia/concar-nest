@@ -1,32 +1,37 @@
-import { PartialType, OmitType } from "@nestjs/mapped-types"
-import { CreateConciliationDto } from "./create-conciliation.dto"
-import { IsOptional, IsDateString, IsNumber } from "class-validator"
+import { PartialType } from "@nestjs/mapped-types"
+import { CreateConciliationItemDto } from "./create-conciliation-item.dto"
+import { IsOptional, IsDateString, IsString, IsNumber } from "class-validator"
 import { Type } from "class-transformer"
 
-export class UpdateConciliationDto extends PartialType(
-  OmitType(CreateConciliationDto, ["companyId", "createdById"] as const),
-) {
+export class UpdateConciliationItemDto extends PartialType(CreateConciliationItemDto) {
   @IsOptional()
   @IsDateString()
-  completedAt?: string
+  conciliatedAt?: string
+}
+
+// NUEVO: DTO para conciliaciones múltiples
+export class CreateMultipleConciliationDto {
+  @IsString()
+  companyId: string
+
+  @IsString()
+  bankAccountId: string
+
+  @IsString({ each: true })
+  transactionIds: string[]
+
+  @IsString({ each: true })
+  documentIds: string[]
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
-  totalTransactions?: number
+  toleranceAmount?: number = 30
 
   @IsOptional()
-  @IsNumber()
-  @Type(() => Number)
-  totalDocuments?: number
+  @IsString()
+  notes?: string
 
-  @IsOptional()
-  @IsNumber()
-  @Type(() => Number)
-  conciliatedItems?: number
-
-  @IsOptional()
-  @IsNumber()
-  @Type(() => Number)
-  pendingItems?: number
+  @IsString()
+  createdById: string
 }

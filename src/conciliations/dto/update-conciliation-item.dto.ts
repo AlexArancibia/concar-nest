@@ -1,11 +1,9 @@
-import { PartialType, OmitType } from "@nestjs/mapped-types"
-import { CreateConciliationItemDto } from "./create-conciliation-item.dto"
+import { PartialType } from "@nestjs/mapped-types"
+import { CreateConciliationDto } from "./create-conciliation.dto"
 import { IsOptional, IsDateString } from "class-validator"
 
-export class UpdateConciliationItemDto extends PartialType(
-  OmitType(CreateConciliationItemDto, ["conciliationId"] as const),
-) {
+export class UpdateConciliationDto extends PartialType(CreateConciliationDto) {
   @IsOptional()
   @IsDateString()
-  conciliatedAt?: string
+  completedAt?: string
 }

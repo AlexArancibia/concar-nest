@@ -41,6 +41,12 @@ export class CreateConciliationItemDto {
   difference?: number = 0
 
   @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Type(() => Number)
+  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
+  distributionPercentage?: number
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))

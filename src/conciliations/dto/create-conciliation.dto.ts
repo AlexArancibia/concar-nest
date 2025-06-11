@@ -15,6 +15,26 @@ export class CreateConciliationDto {
   @IsDateString()
   periodEnd: string
 
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  totalTransactions?: number = 0
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  totalDocuments?: number = 0
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  conciliatedItems?: number = 0
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  pendingItems?: number = 0
+
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
@@ -29,6 +49,12 @@ export class CreateConciliationDto {
   @Type(() => Number)
   @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   difference: number
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
+  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
+  toleranceAmount?: number = 0
 
   @IsOptional()
   @IsEnum(ConciliationStatus)

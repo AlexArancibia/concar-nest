@@ -519,7 +519,6 @@ model Transaction {
   @@index([supplierId])
   @@map("transactions")
 }
-
 // ============================================================================
 // CONCILIATION (Proceso de Conciliación)
 // ============================================================================
@@ -555,6 +554,9 @@ model Conciliation {
   bankBalance     Decimal             @db.Decimal(15, 2) // Saldo según banco
   bookBalance     Decimal             @db.Decimal(15, 2) // Saldo según libros
   difference      Decimal             @db.Decimal(15, 2) // Diferencia
+  
+  // NUEVO: Tolerancia aplicada
+  toleranceAmount Decimal?            @db.Decimal(10, 2) @default(0) // Tolerancia usada
   
   // Estado y proceso
   status          ConciliationStatus @default(PENDING)
@@ -611,6 +613,9 @@ model ConciliationItem {
   documentAmount    Decimal?                  @db.Decimal(15, 2) // Monto del documento
   conciliatedAmount Decimal                   @db.Decimal(15, 2) // Monto conciliado
   difference        Decimal                   @db.Decimal(15, 2) @default(0) // Diferencia
+  
+  // NUEVO: Distribución proporcional
+  distributionPercentage Decimal?             @db.Decimal(5, 4) // % del total que representa
   
   // Información de detracciones y retenciones aplicadas
   detractionAmount  Decimal?                  @db.Decimal(15, 2)
