@@ -27,7 +27,7 @@ export class ConciliationsController {
 
   // Conciliation endpoints
   @Get("company/:companyId")
-  async fetchConciliations(@Query("companyId") companyId: string, @Query() pagination: PaginationDto) {
+  async fetchConciliations(@Param("companyId") companyId: string, @Query() pagination: PaginationDto) {
     if (!companyId) {
       throw new BadRequestException("Company ID is required")
     }

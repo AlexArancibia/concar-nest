@@ -3,13 +3,13 @@ import { ConciliationItemType, ConciliationItemStatus } from "@prisma/client"
 import { Type, Transform } from "class-transformer"
 
 export class CreateConciliationItemDto {
-  @IsUUID()
+  @IsString()
   conciliationId: string;
 
   @IsEnum(ConciliationItemType)
   itemType: ConciliationItemType;
 
-  @IsUUID()
+  @IsString()
   documentId: string;
 
   @IsNumber()
@@ -46,6 +46,6 @@ export class CreateConciliationItemDto {
   @IsOptional()
   systemNotes?: string;
 
-  @IsUUID()
+  @IsString()
   conciliatedBy: string;
 }

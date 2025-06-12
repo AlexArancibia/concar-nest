@@ -3,13 +3,13 @@ import { ConciliationStatus } from "@prisma/client"
 import { Type, Transform } from "class-transformer"
 
 export class CreateConciliationDto {
-  @IsUUID()
+  @IsString()
   companyId: string;
 
-  @IsUUID()
+  @IsString()
   bankAccountId: string;
 
-  @IsUUID()
+  @IsString()
   transactionId: string; // Nueva propiedad - una sola transacción
 
   @IsDateString()
@@ -47,6 +47,6 @@ export class CreateConciliationDto {
   @IsOptional()
   status: ConciliationStatus = ConciliationStatus.PENDING;
 
-  @IsUUID()
+  @IsString()
   createdById: string;
 }

@@ -36,7 +36,29 @@ export class ConciliationsService {
           items: {
             take: 5,
             include: {
-              document: true,
+              document: {
+                select: {
+                  id: true,
+                  fullNumber: true,
+                  supplierId: true,
+                  issueDate: true,
+                  dueDate: true,
+                  currency: true,
+                  total: true,
+                  pendingAmount: true,
+                  conciliatedAmount: true,
+                  description: true,
+                  status: true,
+                  supplier: {
+                    select: {
+                      id: true,
+                      businessName: true,
+                      documentNumber: true,
+                      documentType: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -189,8 +211,26 @@ export class ConciliationsService {
         items: {
           include: {
             document: {
-              include: {
-                supplier: true,
+              select: {
+                id: true,
+                fullNumber: true,
+                supplierId: true,
+                issueDate: true,
+                dueDate: true,
+                currency: true,
+                total: true,
+                pendingAmount: true,
+                conciliatedAmount: true,
+                description: true,
+                status: true,
+                supplier: {
+                  select: {
+                    id: true,
+                    businessName: true,
+                    documentNumber: true,
+                    documentType: true,
+                  },
+                },
               },
             },
           },
@@ -239,7 +279,29 @@ export class ConciliationsService {
         conciliatedBy: item.conciliatedBy,
       },
       include: {
-        document: true,
+        document: {
+          select: {
+            id: true,
+            fullNumber: true,
+            supplierId: true,
+            issueDate: true,
+            dueDate: true,
+            currency: true,
+            total: true,
+            pendingAmount: true,
+            conciliatedAmount: true,
+            description: true,
+            status: true,
+            supplier: {
+              select: {
+                id: true,
+                businessName: true,
+                documentNumber: true,
+                documentType: true,
+              },
+            },
+          },
+        },
       },
     })
 
@@ -272,7 +334,29 @@ export class ConciliationsService {
         updatedAt: new Date(),
       },
       include: {
-        document: true,
+        document: {
+          select: {
+            id: true,
+            fullNumber: true,
+            supplierId: true,
+            issueDate: true,
+            dueDate: true,
+            currency: true,
+            total: true,
+            pendingAmount: true,
+            conciliatedAmount: true,
+            description: true,
+            status: true,
+            supplier: {
+              select: {
+                id: true,
+                businessName: true,
+                documentNumber: true,
+                documentType: true,
+              },
+            },
+          },
+        },
       },
     })
 
@@ -305,7 +389,29 @@ export class ConciliationsService {
     const item = await this.prisma.conciliationItem.findUnique({
       where: { id },
       include: {
-        document: true,
+        document: {
+          select: {
+            id: true,
+            fullNumber: true,
+            supplierId: true,
+            issueDate: true,
+            dueDate: true,
+            currency: true,
+            total: true,
+            pendingAmount: true,
+            conciliatedAmount: true,
+            description: true,
+            status: true,
+            supplier: {
+              select: {
+                id: true,
+                businessName: true,
+                documentNumber: true,
+                documentType: true,
+              },
+            },
+          },
+        },
       },
     })
 
@@ -317,8 +423,26 @@ export class ConciliationsService {
       where: { conciliationId },
       include: {
         document: {
-          include: {
-            supplier: true,
+          select: {
+            id: true,
+            fullNumber: true,
+            supplierId: true,
+            issueDate: true,
+            dueDate: true,
+            currency: true,
+            total: true,
+            pendingAmount: true,
+            conciliatedAmount: true,
+            description: true,
+            status: true,
+            supplier: {
+              select: {
+                id: true,
+                businessName: true,
+                documentNumber: true,
+                documentType: true,
+              },
+            },
           },
         },
       },
@@ -435,6 +559,19 @@ export class ConciliationsService {
           gt: 0,
         },
       },
+      select: {
+        id: true,
+        fullNumber: true,
+        supplierId: true,
+        issueDate: true,
+        dueDate: true,
+        currency: true,
+        total: true,
+        pendingAmount: true,
+        conciliatedAmount: true,
+        description: true,
+        status: true,
+      },
     })
 
     let matched = 0
@@ -526,6 +663,12 @@ export class ConciliationsService {
       }),
       this.prisma.document.findMany({
         where: { id: { in: documentIds } },
+        select: {
+          id: true,
+          fullNumber: true,
+          total: true,
+          pendingAmount: true,
+        },
       }),
     ])
 
