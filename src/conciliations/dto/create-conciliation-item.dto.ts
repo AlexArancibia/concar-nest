@@ -1,76 +1,51 @@
-import { IsString, IsEnum, IsNumber, IsOptional } from "class-validator"
+import { IsString, IsEnum, IsNumber, IsOptional, IsUUID } from "class-validator"
 import { ConciliationItemType, ConciliationItemStatus } from "@prisma/client"
 import { Type, Transform } from "class-transformer"
 
 export class CreateConciliationItemDto {
-  @IsString()
-  conciliationId: string
+  @IsUUID()
+  conciliationId: string;
 
   @IsEnum(ConciliationItemType)
-  itemType: ConciliationItemType
+  itemType: ConciliationItemType;
 
+  @IsUUID()
+  documentId: string;
+
+  @IsNumber()
+  documentAmount: number;
+
+  @IsNumber()
+  conciliatedAmount: number;
+
+  @IsNumber()
   @IsOptional()
-  @IsString()
-  transactionId?: string
+  difference: number = 0;
 
+  @IsNumber()
   @IsOptional()
-  @IsString()
-  documentId?: string
+  distributionPercentage?: number;
 
+  @IsNumber()
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  transactionAmount?: number
+  detractionAmount?: number;
 
+  @IsNumber()
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  documentAmount?: number
+  retentionAmount?: number;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  conciliatedAmount: number
-
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  difference?: number = 0
-
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  distributionPercentage?: number
-
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  detractionAmount?: number
-
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  retentionAmount?: number
-
-  @IsOptional()
   @IsEnum(ConciliationItemStatus)
-  status?: ConciliationItemStatus = ConciliationItemStatus.PENDING
-
   @IsOptional()
-  @IsString()
-  notes?: string
+  status: ConciliationItemStatus = ConciliationItemStatus.PENDING;
 
-  @IsOptional()
   @IsString()
-  systemNotes?: string
+  @IsOptional()
+  notes: string = '';
 
-  @IsOptional()
   @IsString()
-  conciliatedBy?: string
+  @IsOptional()
+  systemNotes?: string;
+
+  @IsUUID()
+  conciliatedBy: string;
 }

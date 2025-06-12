@@ -227,11 +227,8 @@ export class DocumentsService {
         lines: {
           orderBy: { lineNumber: "asc" },
         },
-        conciliationItems: {
-          include: {
-            transaction: true,
-          },
-        },
+        conciliationItems: true
+       
       },
     })
 

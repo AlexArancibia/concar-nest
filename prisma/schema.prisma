@@ -508,7 +508,7 @@ model Transaction {
   updatedAt         DateTime       @updatedAt
   
   // Relaciones
-  conciliationItems ConciliationItem[]
+ 
   
   @@unique([bankAccountId, operationNumber, transactionDate,balance]) // Evitar duplicados
   @@unique([transactionHash]) // Hash único
@@ -518,6 +518,7 @@ model Transaction {
   @@index([bankAccountId, transactionDate])
   @@index([supplierId])
   @@map("transactions")
+  conciliation Conciliation[]
 }
 // ============================================================================
 // CONCILIATION (Proceso de Conciliación)
@@ -540,22 +541,25 @@ model Conciliation {
   bankAccountId   String
   bankAccount     BankAccount         @relation(fields: [bankAccountId], references: [id])
   
+  // NUEVO: Relación directa con una única transacción
+  transactionId   String              @unique // Relación 1:1 con una transacción
+  transaction     Transaction         @relation(fields: [transactionId], references: [id])
+  
   // Período de conciliación
   periodStart     DateTime            // Fecha inicio del período
   periodEnd       DateTime            // Fecha fin del período
   
   // Resumen de la conciliación
-  totalTransactions Int              @default(0) // Total de transacciones en el período
-  totalDocuments    Int              @default(0) // Total de documentos en el período
+  totalDocuments    Int              @default(0) // Total de documentos conciliados
   conciliatedItems  Int              @default(0) // Items conciliados
   pendingItems      Int              @default(0) // Items pendientes
   
   // Saldos
-  bankBalance     Decimal             @db.Decimal(15, 2) // Saldo según banco
+  bankBalance     Decimal             @db.Decimal(15, 2) // Saldo según banco (de la transacción)
   bookBalance     Decimal             @db.Decimal(15, 2) // Saldo según libros
   difference      Decimal             @db.Decimal(15, 2) // Diferencia
   
-  // NUEVO: Tolerancia aplicada
+  // Tolerancia aplicada
   toleranceAmount Decimal?            @db.Decimal(10, 2) @default(0) // Tolerancia usada
   
   // Estado y proceso
@@ -575,12 +579,12 @@ model Conciliation {
   
   @@index([companyId, bankAccountId])
   @@index([companyId, periodStart, periodEnd])
+  @@index([transactionId]) // Nuevo índice para la transacción
   @@map("conciliations")
 }
 
 enum ConciliationItemType {
   DOCUMENT_TRANSACTION  // Documento conciliado con transacción
-  TRANSACTION_ONLY      // Transacción sin documento (ej: ITF, comisiones)
   DOCUMENT_ONLY         // Documento sin transacción (pendiente de pago)
   ADJUSTMENT            // Ajuste manual
 }
@@ -602,19 +606,16 @@ model ConciliationItem {
   // Tipo de conciliación
   itemType          ConciliationItemType
   
-  // Referencias a transacción y documento
-  transactionId     String?
-  transaction       Transaction?              @relation(fields: [transactionId], references: [id])
-  documentId        String?
-  document          Document?                 @relation(fields: [documentId], references: [id])
+  // Referencias a documento (la transacción ahora está en la conciliación)
+  documentId        String
+  document          Document                  @relation(fields: [documentId], references: [id])
   
   // Información del item
-  transactionAmount Decimal?                  @db.Decimal(15, 2) // Monto de la transacción
-  documentAmount    Decimal?                  @db.Decimal(15, 2) // Monto del documento
+  documentAmount    Decimal                   @db.Decimal(15, 2) // Monto del documento
   conciliatedAmount Decimal                   @db.Decimal(15, 2) // Monto conciliado
   difference        Decimal                   @db.Decimal(15, 2) @default(0) // Diferencia
   
-  // NUEVO: Distribución proporcional
+  // Distribución proporcional
   distributionPercentage Decimal?             @db.Decimal(5, 4) // % del total que representa
   
   // Información de detracciones y retenciones aplicadas
@@ -629,15 +630,13 @@ model ConciliationItem {
   systemNotes       String?                   // Notas generadas automáticamente
   
   // Información de auditoría
-  conciliatedAt     DateTime?
-  conciliatedBy     String?
+  conciliatedBy     String
   
   // Timestamps
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   
   @@index([conciliationId])
-  @@index([transactionId])
   @@index([documentId])
   @@map("conciliation_items")
 }

@@ -21,9 +21,7 @@ export class TransactionsService {
         include: {
           bankAccount: true,
           supplier: true,
-          conciliationItems: {
-            include: { document: true },
-          },
+          conciliation:  true,
         },
         orderBy: { transactionDate: "desc" },
         skip,
@@ -109,12 +107,8 @@ export class TransactionsService {
       include: {
         bankAccount: true,
         supplier: true,
-        conciliationItems: {
-          include: {
-            document: true,
-            conciliation: true,
-          },
-        },
+        conciliation:true,
+       
       },
     })
   }

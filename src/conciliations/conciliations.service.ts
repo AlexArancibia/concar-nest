@@ -1,95 +1,17 @@
-import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common"
-import   { PrismaService } from "../prisma/prisma.service"
-import   { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from "@nestjs/common"
+import  { PrismaService } from "../prisma/prisma.service"
+import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
 import {
-    Conciliation,
+   Conciliation,
    ConciliationItem,
   ConciliationStatus,
   ConciliationItemStatus,
   ConciliationItemType,
 } from "@prisma/client"
-
-// DTOs interfaces (para evitar errores de importación)
-interface CreateConciliationDto {
-  companyId: string
-  bankAccountId: string
-  periodStart: string
-  periodEnd: string
-  totalTransactions?: number
-  totalDocuments?: number
-  conciliatedItems?: number
-  pendingItems?: number
-  bankBalance: number
-  bookBalance: number
-  difference: number
-  toleranceAmount?: number
-  status?: ConciliationStatus
-  createdById: string
-}
-
-interface CreateConciliationItemDto {
-  conciliationId: string
-  itemType: ConciliationItemType
-  transactionId?: string
-  documentId?: string
-  transactionAmount?: number
-  documentAmount?: number
-  conciliatedAmount: number
-  difference?: number
-  distributionPercentage?: number
-  detractionAmount?: number
-  retentionAmount?: number
-  status?: ConciliationItemStatus
-  notes?: string
-  systemNotes?: string
-  conciliatedBy?: string
-}
-
-interface UpdateConciliationDto {
-  companyId?: string
-  bankAccountId?: string
-  periodStart?: string
-  periodEnd?: string
-  totalTransactions?: number
-  totalDocuments?: number
-  conciliatedItems?: number
-  pendingItems?: number
-  bankBalance?: number
-  bookBalance?: number
-  difference?: number
-  toleranceAmount?: number
-  status?: ConciliationStatus
-  completedAt?: string
-}
-
-interface UpdateConciliationItemDto {
-  conciliationId?: string
-  itemType?: ConciliationItemType
-  transactionId?: string
-  documentId?: string
-  transactionAmount?: number
-  documentAmount?: number
-  conciliatedAmount?: number
-  difference?: number
-  distributionPercentage?: number
-  detractionAmount?: number
-  retentionAmount?: number
-  status?: ConciliationItemStatus
-  notes?: string
-  systemNotes?: string
-  conciliatedBy?: string
-  conciliatedAt?: string
-}
-
-interface CreateMultipleConciliationDto {
-  companyId: string
-  bankAccountId: string
-  transactionIds: string[]
-  documentIds: string[]
-  toleranceAmount?: number
-  notes?: string
-  createdById: string
-}
+import  { CreateConciliationDto } from "./dto/create-conciliation.dto"
+import  { UpdateConciliationDto } from "./dto/update-conciliation.dto"
+import  { CreateConciliationItemDto } from "./dto/create-conciliation-item.dto"
+import  { UpdateConciliationItemDto } from "./dto/update-conciliation-item.dto"
 
 @Injectable()
 export class ConciliationsService {
@@ -107,13 +29,13 @@ export class ConciliationsService {
             select: { id: true, name: true, ruc: true },
           },
           bankAccount: true,
+          transaction: true, // Incluir la transacción única
           createdBy: {
             select: { id: true, firstName: true, lastName: true, email: true },
           },
           items: {
             take: 5,
             include: {
-              transaction: true,
               document: true,
             },
           },
@@ -135,13 +57,33 @@ export class ConciliationsService {
   }
 
   async createConciliation(conciliationDto: CreateConciliationDto): Promise<Conciliation> {
+    // Verificar que la transacción existe
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: conciliationDto.transactionId },
+    })
+
+    if (!transaction) {
+      throw new NotFoundException(`Transaction with ID ${conciliationDto.transactionId} not found`)
+    }
+
+    // Verificar que la transacción no esté ya conciliada
+    const existingConciliation = await this.prisma.conciliation.findUnique({
+      where: { transactionId: conciliationDto.transactionId },
+    })
+
+    if (existingConciliation) {
+      throw new ConflictException(
+        `Transaction with ID ${conciliationDto.transactionId} is already associated with another conciliation`,
+      )
+    }
+
     return this.prisma.conciliation.create({
       data: {
         companyId: conciliationDto.companyId,
         bankAccountId: conciliationDto.bankAccountId,
+        transactionId: conciliationDto.transactionId, // Nueva relación directa
         periodStart: new Date(conciliationDto.periodStart),
         periodEnd: new Date(conciliationDto.periodEnd),
-        totalTransactions: conciliationDto.totalTransactions || 0,
         totalDocuments: conciliationDto.totalDocuments || 0,
         conciliatedItems: conciliationDto.conciliatedItems || 0,
         pendingItems: conciliationDto.pendingItems || 0,
@@ -157,6 +99,7 @@ export class ConciliationsService {
           select: { id: true, name: true, ruc: true },
         },
         bankAccount: true,
+        transaction: true, // Incluir la transacción
         createdBy: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
@@ -197,6 +140,7 @@ export class ConciliationsService {
           select: { id: true, name: true, ruc: true },
         },
         bankAccount: true,
+        transaction: true,
         createdBy: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
@@ -207,12 +151,19 @@ export class ConciliationsService {
   async deleteConciliation(id: string): Promise<void> {
     const conciliation = await this.prisma.conciliation.findUnique({
       where: { id },
+      include: { items: true },
     })
 
     if (!conciliation) {
       throw new NotFoundException(`Conciliation with ID ${id} not found`)
     }
 
+    // Eliminar todos los items primero
+    await this.prisma.conciliationItem.deleteMany({
+      where: { conciliationId: id },
+    })
+
+    // Luego eliminar la conciliación
     await this.prisma.conciliation.delete({
       where: { id },
     })
@@ -226,16 +177,17 @@ export class ConciliationsService {
           select: { id: true, name: true, ruc: true },
         },
         bankAccount: true,
+        transaction: {
+          // Incluir la transacción única
+          include: {
+            supplier: true,
+          },
+        },
         createdBy: {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
         items: {
           include: {
-            transaction: {
-              include: {
-                supplier: true,
-              },
-            },
             document: {
               include: {
                 supplier: true,
@@ -252,14 +204,30 @@ export class ConciliationsService {
 
   // ConciliationItem methods
   async createConciliationItem(item: CreateConciliationItemDto): Promise<ConciliationItem> {
-    return this.prisma.conciliationItem.create({
+    // Verificar que la conciliación existe
+    const conciliation = await this.prisma.conciliation.findUnique({
+      where: { id: item.conciliationId },
+    })
+
+    if (!conciliation) {
+      throw new NotFoundException(`Conciliation with ID ${item.conciliationId} not found`)
+    }
+
+    // Verificar que el documento existe
+    const document = await this.prisma.document.findUnique({
+      where: { id: item.documentId },
+    })
+
+    if (!document) {
+      throw new NotFoundException(`Document with ID ${item.documentId} not found`)
+    }
+
+    const conciliationItem = await this.prisma.conciliationItem.create({
       data: {
         conciliationId: item.conciliationId,
         itemType: item.itemType,
-        transactionId: item.transactionId || null,
-        documentId: item.documentId || null,
-        transactionAmount: item.transactionAmount || null,
-        documentAmount: item.documentAmount || null,
+        documentId: item.documentId, // Solo documento, la transacción está en la conciliación
+        documentAmount: item.documentAmount,
         conciliatedAmount: item.conciliatedAmount,
         difference: item.difference || 0,
         distributionPercentage: item.distributionPercentage || null,
@@ -268,14 +236,17 @@ export class ConciliationsService {
         status: item.status || ConciliationItemStatus.PENDING,
         notes: item.notes || null,
         systemNotes: item.systemNotes || null,
-        conciliatedBy: item.conciliatedBy || null,
-        conciliatedAt: item.conciliatedBy ? new Date() : null, // Si hay conciliatedBy, se asume que está conciliado
+        conciliatedBy: item.conciliatedBy,
       },
       include: {
-        transaction: true,
         document: true,
       },
     })
+
+    // Actualizar contadores de la conciliación
+    await this.updateConciliationCounters(item.conciliationId)
+
+    return conciliationItem
   }
 
   async updateConciliationItem(id: string, updates: UpdateConciliationItemDto): Promise<ConciliationItem> {
@@ -294,17 +265,21 @@ export class ConciliationsService {
       updateData.conciliatedAt = new Date(updateData.conciliatedAt)
     }
 
-    return this.prisma.conciliationItem.update({
+    const updatedItem = await this.prisma.conciliationItem.update({
       where: { id },
       data: {
         ...updateData,
         updatedAt: new Date(),
       },
       include: {
-        transaction: true,
         document: true,
       },
     })
+
+    // Actualizar contadores de la conciliación
+    await this.updateConciliationCounters(existingItem.conciliationId)
+
+    return updatedItem
   }
 
   async deleteConciliationItem(id: string): Promise<void> {
@@ -316,16 +291,20 @@ export class ConciliationsService {
       throw new NotFoundException(`Conciliation item with ID ${id} not found`)
     }
 
+    const conciliationId = item.conciliationId
+
     await this.prisma.conciliationItem.delete({
       where: { id },
     })
+
+    // Actualizar contadores de la conciliación
+    await this.updateConciliationCounters(conciliationId)
   }
 
   async getConciliationItemById(id: string): Promise<ConciliationItem | undefined> {
     const item = await this.prisma.conciliationItem.findUnique({
       where: { id },
       include: {
-        transaction: true,
         document: true,
       },
     })
@@ -337,11 +316,6 @@ export class ConciliationsService {
     return this.prisma.conciliationItem.findMany({
       where: { conciliationId },
       include: {
-        transaction: {
-          include: {
-            supplier: true,
-          },
-        },
         document: {
           include: {
             supplier: true,
@@ -352,194 +326,90 @@ export class ConciliationsService {
     })
   }
 
-  // NUEVO: Método para conciliaciones múltiples
-  async createMultipleConciliation(dto: CreateMultipleConciliationDto): Promise<Conciliation> {
-    // 1. Validar que las transacciones existan y sean de la misma cuenta
-    const transactions = await this.prisma.transaction.findMany({
-      where: {
-        id: { in: dto.transactionIds },
-        companyId: dto.companyId,
-        bankAccountId: dto.bankAccountId,
-        status: { not: "CONCILIATED" },
+  // Método privado para actualizar contadores
+  private async updateConciliationCounters(conciliationId: string): Promise<void> {
+    const items = await this.prisma.conciliationItem.findMany({
+      where: { conciliationId },
+    })
+
+    const totalDocuments = items.length
+    const conciliatedItems = items.filter(
+      (item) => item.status === ConciliationItemStatus.MATCHED || item.status === ConciliationItemStatus.PARTIAL_MATCH,
+    ).length
+    const pendingItems = totalDocuments - conciliatedItems
+
+    await this.prisma.conciliation.update({
+      where: { id: conciliationId },
+      data: {
+        totalDocuments,
+        conciliatedItems,
+        pendingItems,
       },
     })
+  }
 
-    if (transactions.length !== dto.transactionIds.length) {
-      throw new BadRequestException("Some transactions not found or already conciliated")
+  // Método para completar conciliación
+  async completeConciliation(id: string): Promise<Conciliation> {
+    const conciliation = await this.getConciliationById(id)
+    if (!conciliation) {
+      throw new NotFoundException(`Conciliation with ID ${id} not found`)
     }
 
-    // 2. Validar que los documentos existan
-    const documents = await this.prisma.document.findMany({
-      where: {
-        id: { in: dto.documentIds },
-        companyId: dto.companyId,
-        status: { not: "CONCILIATED" },
-      },
+    // Verificar si todos los items están conciliados
+    const items = await this.prisma.conciliationItem.findMany({
+      where: { conciliationId: id },
     })
 
-    if (documents.length !== dto.documentIds.length) {
-      throw new BadRequestException("Some documents not found or already conciliated")
+    const allConciliated = items.every(
+      (item) => item.status === ConciliationItemStatus.MATCHED || item.status === ConciliationItemStatus.PARTIAL_MATCH,
+    )
+
+    if (!allConciliated) {
+      throw new BadRequestException("Cannot complete conciliation because there are pending items")
     }
 
-    // 3. Calcular totales y validar tolerancia
-    const totalTransactionAmount = transactions.reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0)
-    const totalDocumentAmount = documents.reduce((sum, d) => sum + Number(d.pendingAmount || d.total), 0)
-    const difference = Math.abs(totalTransactionAmount - totalDocumentAmount)
-
-    if (difference > (dto.toleranceAmount || 30)) {
-      throw new BadRequestException(
-        `Difference ${difference.toFixed(2)} exceeds tolerance ${dto.toleranceAmount || 30}`,
-      )
+    // Actualizar la transacción como conciliada
+    if (conciliation.transactionId) {
+      await this.prisma.transaction.update({
+        where: { id: conciliation.transactionId },
+        data: {
+          status: "CONCILIATED",
+          conciliatedAmount: items.reduce((sum, item) => sum + Number(item.conciliatedAmount), 0),
+          pendingAmount: 0,
+        },
+      })
     }
 
-    // 4. Determinar período
-    const transactionDates = transactions.map((t) => t.transactionDate)
-    const periodStart = new Date(Math.min(...transactionDates.map((d) => d.getTime())))
-    const periodEnd = new Date(Math.max(...transactionDates.map((d) => d.getTime())))
+    // Actualizar los documentos
+    for (const item of items) {
+      const document = await this.prisma.document.findUnique({
+        where: { id: item.documentId },
+      })
 
-    // 5. Crear conciliación
-    const conciliation = await this.createConciliation({
-      companyId: dto.companyId,
-      bankAccountId: dto.bankAccountId,
-      periodStart: periodStart.toISOString(),
-      periodEnd: periodEnd.toISOString(),
-      totalTransactions: transactions.length,
-      totalDocuments: documents.length,
-      bankBalance: totalTransactionAmount,
-      bookBalance: totalDocumentAmount,
-      difference,
-      toleranceAmount: dto.toleranceAmount || 30,
-      status: ConciliationStatus.IN_PROGRESS,
-      createdById: dto.createdById,
-    })
+      if (document) {
+        const newConciliatedAmount = Number(document.conciliatedAmount || 0) + Number(item.conciliatedAmount)
+        const newPendingAmount = Math.max(0, Number(document.total) - newConciliatedAmount)
+        const newStatus = newPendingAmount <= 0.01 ? "CONCILIATED" : "PARTIALLY_CONCILIATED"
 
-    // 6. Crear items con distribución proporcional
-    const conciliationItems = []
-
-    for (const transaction of transactions) {
-      const transactionAmount = Math.abs(Number(transaction.amount))
-      const transactionProportion = transactionAmount / totalTransactionAmount
-
-      for (const document of documents) {
-        const documentAmount = Number(document.pendingAmount || document.total)
-        const proportionalAmount = documentAmount * transactionProportion
-
-        const item = await this.createConciliationItem({
-          conciliationId: conciliation.id,
-          itemType: ConciliationItemType.DOCUMENT_TRANSACTION,
-          transactionId: transaction.id,
-          documentId: document.id,
-          transactionAmount,
-          documentAmount,
-          conciliatedAmount: proportionalAmount,
-          difference: 0,
-          distributionPercentage: transactionProportion,
-          detractionAmount: document.detractionAmount ? Number(document.detractionAmount) : undefined,
-          retentionAmount: document.retentionAmount ? Number(document.retentionAmount) : undefined,
-          status:
-            difference <= (dto.toleranceAmount || 30)
-              ? ConciliationItemStatus.MATCHED
-              : ConciliationItemStatus.PARTIAL_MATCH,
-          notes: dto.notes,
-          systemNotes: `Distributed ${(transactionProportion * 100).toFixed(2)}% of transaction amount`,
-          conciliatedBy: dto.createdById,
-        })
-
-        conciliationItems.push(item)
-      }
-    }
-
-    // 7. Actualizar estados de transacciones y documentos
-    await Promise.all([
-      // Actualizar transacciones
-      ...transactions.map((transaction) =>
-        this.prisma.transaction.update({
-          where: { id: transaction.id },
-          data: {
-            status: "CONCILIATED",
-            conciliatedAmount: Math.abs(Number(transaction.amount)),
-            pendingAmount: 0,
-          },
-        }),
-      ),
-      // Actualizar documentos
-      ...documents.map((document) => {
-        const documentAmount = Number(document.pendingAmount || document.total)
-        const newConciliatedAmount = Number(document.conciliatedAmount || 0) + documentAmount
-        const newPendingAmount = Number(document.total) - newConciliatedAmount
-
-        return this.prisma.document.update({
+        await this.prisma.document.update({
           where: { id: document.id },
           data: {
             conciliatedAmount: newConciliatedAmount,
             pendingAmount: newPendingAmount,
-            status: newPendingAmount <= 0.01 ? "CONCILIATED" : "PARTIALLY_CONCILIATED",
+            status: newStatus,
           },
         })
-      }),
-    ])
+      }
+    }
 
-    // 8. Finalizar conciliación
-    return this.updateConciliation(conciliation.id, {
-      conciliatedItems: conciliationItems.length,
-      pendingItems: 0,
+    // Completar la conciliación
+    return this.updateConciliation(id, {
       status: ConciliationStatus.COMPLETED,
       completedAt: new Date().toISOString(),
     })
   }
 
-  // NUEVO: Validar conciliación múltiple
-  async validateMultipleConciliation(
-    transactionIds: string[],
-    documentIds: string[],
-    tolerance = 30,
-  ): Promise<{
-    isValid: boolean
-    totalTransactions: number
-    totalDocuments: number
-    difference: number
-    withinTolerance: boolean
-    errors: string[]
-  }> {
-    const errors: string[] = []
-
-    const [transactions, documents] = await Promise.all([
-      this.prisma.transaction.findMany({
-        where: { id: { in: transactionIds } },
-      }),
-      this.prisma.document.findMany({
-        where: { id: { in: documentIds } },
-      }),
-    ])
-
-    if (transactions.length !== transactionIds.length) {
-      errors.push("Some transactions not found")
-    }
-
-    if (documents.length !== documentIds.length) {
-      errors.push("Some documents not found")
-    }
-
-    const totalTransactions = transactions.reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0)
-    const totalDocuments = documents.reduce((sum, d) => sum + Number(d.pendingAmount || d.total), 0)
-    const difference = Math.abs(totalTransactions - totalDocuments)
-    const withinTolerance = difference <= tolerance
-
-    if (!withinTolerance) {
-      errors.push(`Difference ${difference.toFixed(2)} exceeds tolerance ${tolerance}`)
-    }
-
-    return {
-      isValid: errors.length === 0 && transactions.length > 0 && documents.length > 0,
-      totalTransactions,
-      totalDocuments,
-      difference,
-      withinTolerance,
-      errors,
-    }
-  }
-
-  // Método existente mejorado
+  // Método mejorado para conciliación automática
   async performAutomaticConciliation(conciliationId: string): Promise<{
     matched: number
     partialMatches: number
@@ -550,76 +420,82 @@ export class ConciliationsService {
       throw new NotFoundException(`Conciliation with ID ${conciliationId} not found`)
     }
 
-    // Get transactions and documents for the period
-    const [transactions, documents] = await Promise.all([
-      this.prisma.transaction.findMany({
-        where: {
-          companyId: conciliation.companyId,
-          bankAccountId: conciliation.bankAccountId,
-          transactionDate: {
-            gte: conciliation.periodStart,
-            lte: conciliation.periodEnd,
-          },
-          status: "PENDING",
+    // Obtener documentos disponibles para el período
+    const documents = await this.prisma.document.findMany({
+      where: {
+        companyId: conciliation.companyId,
+        issueDate: {
+          gte: conciliation.periodStart,
+          lte: conciliation.periodEnd,
         },
-      }),
-      this.prisma.document.findMany({
-        where: {
-          companyId: conciliation.companyId,
-          issueDate: {
-            gte: conciliation.periodStart,
-            lte: conciliation.periodEnd,
-          },
-          status: {
-            in: ["VALIDATED", "PENDING"],
-          },
+        status: {
+          in: ["VALIDATED", "PENDING"],
         },
-      }),
-    ])
+        pendingAmount: {
+          gt: 0,
+        },
+      },
+    })
 
     let matched = 0
     let partialMatches = 0
     let unmatched = 0
 
-    // Simple matching algorithm - can be enhanced
-    for (const transaction of transactions) {
-      const matchingDocuments = documents.filter((doc) => {
-        const amountMatch =
-          Math.abs(Number(doc.netPayableAmount || doc.total) - Math.abs(Number(transaction.amount))) <
-          (Number(conciliation.toleranceAmount) || 0.01)
-        const supplierMatch = doc.supplierId === transaction.supplierId
-        return amountMatch || supplierMatch
-      })
+    // Fetch the transaction separately
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: conciliation.transactionId },
+      include: { supplier: true },
+    })
 
-      if (matchingDocuments.length === 1) {
-        const document = matchingDocuments[0]
+    if (!transaction) {
+      throw new NotFoundException(`Transaction with ID ${conciliation.transactionId} not found`)
+    }
+
+    const transactionAmount = Math.abs(Number(transaction.amount || 0))
+    const tolerance = Number(conciliation.toleranceAmount) || 0.01
+
+    // Algoritmo de coincidencia simple - puede mejorarse
+    for (const document of documents) {
+      const documentAmount = Number(document.pendingAmount || document.total)
+      const amountDifference = Math.abs(documentAmount - transactionAmount)
+
+      if (amountDifference <= tolerance) {
+        // Coincidencia exacta
         await this.createConciliationItem({
           conciliationId,
           itemType: ConciliationItemType.DOCUMENT_TRANSACTION,
-          transactionId: transaction.id,
           documentId: document.id,
-          transactionAmount: Math.abs(Number(transaction.amount)),
-          documentAmount: Number(document.netPayableAmount || document.total),
-          conciliatedAmount: Math.min(
-            Math.abs(Number(transaction.amount)),
-            Number(document.netPayableAmount || document.total),
-          ),
+          documentAmount,
+          conciliatedAmount: Math.min(transactionAmount, documentAmount),
+          difference: amountDifference,
           status: ConciliationItemStatus.MATCHED,
-          systemNotes: "Automatically matched by amount and supplier",
+          systemNotes: "Automatically matched by amount",
           conciliatedBy: conciliation.createdById,
+          notes: null,
         })
         matched++
-      } else if (matchingDocuments.length > 1) {
-        // Partial match - multiple possibilities
+      } else if (document.supplierId === transaction.supplierId) {
+        // Coincidencia por proveedor pero diferente monto
+        await this.createConciliationItem({
+          conciliationId,
+          itemType: ConciliationItemType.DOCUMENT_TRANSACTION,
+          documentId: document.id,
+          documentAmount,
+          conciliatedAmount: Math.min(transactionAmount, documentAmount),
+          difference: amountDifference,
+          status: ConciliationItemStatus.PARTIAL_MATCH,
+          systemNotes: "Matched by supplier but different amount",
+          conciliatedBy: conciliation.createdById,
+          notes: null,
+        })
         partialMatches++
       } else {
         unmatched++
       }
     }
 
-    // Update conciliation statistics
+    // Actualizar estadísticas de conciliación
     await this.updateConciliation(conciliationId, {
-      totalTransactions: transactions.length,
       totalDocuments: documents.length,
       conciliatedItems: matched,
       pendingItems: partialMatches + unmatched,
@@ -627,5 +503,56 @@ export class ConciliationsService {
     })
 
     return { matched, partialMatches, unmatched }
+  }
+
+  // Método para validar conciliación
+  async validateConciliation(
+    transactionId: string,
+    documentIds: string[],
+    tolerance = 30,
+  ): Promise<{
+    isValid: boolean
+    transactionAmount: number
+    totalDocuments: number
+    difference: number
+    withinTolerance: boolean
+    errors: string[]
+  }> {
+    const errors: string[] = []
+
+    const [transaction, documents] = await Promise.all([
+      this.prisma.transaction.findUnique({
+        where: { id: transactionId },
+      }),
+      this.prisma.document.findMany({
+        where: { id: { in: documentIds } },
+      }),
+    ])
+
+    if (!transaction) {
+      errors.push("Transaction not found")
+    }
+
+    if (documents.length !== documentIds.length) {
+      errors.push("Some documents not found")
+    }
+
+    const transactionAmount = transaction ? Math.abs(Number(transaction.amount)) : 0
+    const totalDocuments = documents.reduce((sum, d) => sum + Number(d.pendingAmount || d.total), 0)
+    const difference = Math.abs(transactionAmount - totalDocuments)
+    const withinTolerance = difference <= tolerance
+
+    if (!withinTolerance) {
+      errors.push(`Difference ${difference.toFixed(2)} exceeds tolerance ${tolerance}`)
+    }
+
+    return {
+      isValid: errors.length === 0 && !!transaction && documents.length > 0,
+      transactionAmount,
+      totalDocuments,
+      difference,
+      withinTolerance,
+      errors,
+    }
   }
 }
