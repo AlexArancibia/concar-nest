@@ -173,21 +173,63 @@ export class ConciliationsService {
   async deleteConciliation(id: string): Promise<void> {
     const conciliation = await this.prisma.conciliation.findUnique({
       where: { id },
-      include: { items: true },
+      include: {
+        items: {
+          include: {
+            document: true,
+          },
+        },
+        transaction: true,
+      },
     })
 
     if (!conciliation) {
       throw new NotFoundException(`Conciliation with ID ${id} not found`)
     }
 
-    // Eliminar todos los items primero
-    await this.prisma.conciliationItem.deleteMany({
-      where: { conciliationId: id },
-    })
+    // Usar transacción para garantizar la integridad
+    await this.prisma.$transaction(async (prisma) => {
+      // 1. Revertir el estado de los documentos asociados
+      for (const item of conciliation.items) {
+        if (item.documentId && item.document) {
+          const document = item.document
+          const newConciliatedAmount = Math.max(0, Number(document.conciliatedAmount) - Number(item.conciliatedAmount))
+          const newPendingAmount = Number(document.total) - newConciliatedAmount
+          const newStatus =
+            newConciliatedAmount <= 0 ? "PENDING" : newPendingAmount <= 0.01 ? "CONCILIATED" : "PARTIALLY_CONCILIATED"
 
-    // Luego eliminar la conciliación
-    await this.prisma.conciliation.delete({
-      where: { id },
+          await prisma.document.update({
+            where: { id: item.documentId },
+            data: {
+              conciliatedAmount: newConciliatedAmount,
+              pendingAmount: newPendingAmount,
+              status: newStatus,
+            },
+          })
+        }
+      }
+
+      // 2. Revertir el estado de la transacción asociada
+      if (conciliation.transactionId && conciliation.transaction) {
+        await prisma.transaction.update({
+          where: { id: conciliation.transactionId },
+          data: {
+            status: "PENDING",
+            conciliatedAmount: 0,
+            pendingAmount: Math.abs(Number(conciliation.transaction.amount)),
+          },
+        })
+      }
+
+      // 3. Eliminar todos los items de conciliación
+      await prisma.conciliationItem.deleteMany({
+        where: { conciliationId: id },
+      })
+
+      // 4. Finalmente eliminar la conciliación
+      await prisma.conciliation.delete({
+        where: { id },
+      })
     })
   }
 
