@@ -1,4 +1,7 @@
- generator client {
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
   provider = "prisma-client-js"
 }
 
@@ -8,758 +11,117 @@ datasource db {
 }
 
 // ============================================================================
-// AUTHENTICATION & USER MANAGEMENT
+// ENUMS
 // ============================================================================
 
 enum UserRole {
-  SUPERADMIN    // Acceso completo al sistema
-  ADMIN         // Administrador de empresa
-  MANAGER       // Usuario que puede hacer conciliaciones
-  EDITOR        // Usuario que puede editar documentos
-  VIEWER        // Solo lectura
+  ADMIN
+  MANAGER
+  ACCOUNTANT
+  EDITOR
+  VIEWER
 }
 
 enum AuthProvider {
-  EMAIL
+  GITHUB
   GOOGLE
   MICROSOFT
-  GITHUB
+  EMAIL
 }
-
-model User {
-  id                String      @id @default(dbgenerated("'user_' || substr(gen_random_uuid()::text, 1, 13)"))
-  email             String      @unique
-  emailVerified     DateTime?
-  password          String?
-  image             String?
-  firstName         String
-  lastName          String
-  role              UserRole
-  
-  // Campos para autenticación con proveedores externos
-  authProvider      AuthProvider @default(EMAIL)
-  authProviderId    String?
-  accessToken       String?
-  refreshToken      String?
-  tokenExpiresAt    DateTime?
-  
-  // Campos adicionales
-  phone             String?
-  bio               String?
-  preferences       Json?
-  lastLogin         DateTime?
-  failedLoginAttempts Int?       @default(0)
-  lockedUntil       DateTime?
-  isActive          Boolean     @default(true)
-  
-  // Relaciones con empresas
-  companyId         String?
-  company           Company?    @relation(fields: [companyId], references: [id])
-  
-  // Timestamps
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-
-  // Relaciones
-  sessions          Session[]
-  auditLogs         AuditLog[]
-  createdDocuments  Document[]  @relation("DocumentCreatedBy")
-  updatedDocuments  Document[]  @relation("DocumentUpdatedBy")
-  conciliations     Conciliation[]
-  expenseImported   Expense[]   @relation("ExpenseImportedBy")
-  expenseProcessed  Expense[]   @relation("ExpenseProcessedBy")
-  expenseReconciled Expense[]   @relation("ExpenseReconciledBy")
-  
-  @@map("users")
-}
-
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
-  @@map("sessions")
-}
-
-// ============================================================================
-// COMPANY & ORGANIZATION
-// ============================================================================
-
-model Company {
-  id              String    @id @default(dbgenerated("'comp_' || substr(gen_random_uuid()::text, 1, 13)"))
-  name            String    // Razón social
-  tradeName       String?   // Nombre comercial
-  ruc             String    @unique // RUC de la empresa
-  address         String?   // Dirección fiscal
-  phone           String?   // Teléfono principal
-  email           String?   // Email corporativo
-  website         String?   // Sitio web
-  logo            String?   // URL del logo
-  
-  // Configuraciones
-  settings        Json?     // Configuraciones específicas de la empresa
-  isActive        Boolean   @default(true)
-  
-  // Timestamps
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  // Relaciones
-  users           User[]
-  suppliers       Supplier[]
-  bankAccounts    BankAccount[]
-  documents       Document[]
-  transactions    Transaction[]
-  conciliations   Conciliation[]
-  expenses        Expense[]
-  
-  @@map("companies")
-}
-
-// ============================================================================
-// SUPPLIERS MANAGEMENT
-// ============================================================================
 
 enum SupplierType {
-  PERSONA_NATURAL
-  PERSONA_JURIDICA
-  EXTRANJERO
+  INDIVIDUAL
+  COMPANY
+  GOVERNMENT
+  FOREIGN
 }
 
 enum SupplierStatus {
   ACTIVE
   INACTIVE
   BLOCKED
-  PENDING_VALIDATION
+  PENDING_APPROVAL
 }
 
-model Supplier {
-  id              String         @id @default(dbgenerated("'supp_' || substr(gen_random_uuid()::text, 1, 13)"))
-  companyId       String
-  company         Company        @relation(fields: [companyId], references: [id])
-  
-  // Información básica
-  businessName    String         // Razón social o nombre completo
-  tradeName       String?        // Nombre comercial
-  documentType    String         // Tipo de documento (RUC, DNI, CE, etc.)
-  documentNumber  String         // Número de documento
-  supplierType    SupplierType   // Tipo de proveedor
-  
-  // Información de contacto
-  email           String?
-  phone           String?
-  address         String?
-  district        String?
-  province        String?
-  department      String?
-  country         String?        @default("PE")
-  
-  // Información bancaria
-  bankAccounts    Json?          // Cuentas bancarias del proveedor
-  
-  // Estado y configuración
-  status          SupplierStatus @default(ACTIVE)
-  creditLimit     Decimal?       @db.Decimal(15, 2)
-  paymentTerms    Int?           // Días de plazo de pago
-  
-  // Información tributaria
-  taxCategory     String?        // Categoría tributaria
-  isRetentionAgent Boolean       @default(false) // Es agente de retención
-  retentionRate   Decimal?       @db.Decimal(5, 4) // Tasa de retención
-  
-  // Timestamps
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  
-  // Relaciones
-  documents       Document[]
-  transactions    Transaction[]
-  expenses        Expense[]
-  
-  @@unique([companyId, documentNumber])
-  @@map("suppliers")
+enum BankAccountType {
+  CHECKING
+  SAVINGS
+  CREDIT
+  INVESTMENT
 }
-
-// ============================================================================
-// DOCUMENTS MANAGEMENT (Documentos Fiscales - XML)
-// ============================================================================
 
 enum DocumentType {
-  FACTURA           // 01
-  BOLETA            // 03
-  NOTA_CREDITO      // 07
-  NOTA_DEBITO       // 08
-  RECIBO_HONORARIOS // 02
-  LIQUIDACION       // 04
-  OTROS             // 99
+  INVOICE
+  CREDIT_NOTE
+  DEBIT_NOTE
+  RECEIPT
+  PURCHASE_ORDER
+  CONTRACT
 }
 
 enum DocumentStatus {
-  PENDING           // Pendiente de procesamiento
-  VALIDATED         // Validado contra SUNAT
-  REJECTED          // Rechazado por SUNAT
-  CONCILIATED       // Conciliado con transacción bancaria
-  PARTIALLY_CONCILIATED // Parcialmente conciliado
-  PAID              // Pagado completamente
-  OVERDUE           // Vencido
-  CANCELLED         // Anulado
-}
-
-model Document {
-  id                    String            @id @default(cuid())
-  companyId             String
-  documentType          DocumentType
-  series                String
-  number                String
-  fullNumber            String            // Serie-Número completo
-  supplierId            String
-  issueDate             DateTime
-  issueTime             String?           // Hora de emisión del XML
-  dueDate               DateTime?
-  receptionDate         DateTime?
-  currency              String            @default("PEN")
-  exchangeRate          Decimal?          @db.Decimal(10, 6)
-  subtotal              Decimal           @db.Decimal(12, 2)
-  igv                   Decimal           @db.Decimal(12, 2)
-  otherTaxes            Decimal?          @db.Decimal(12, 2)
-  total                 Decimal           @db.Decimal(12, 2)
-  
-  // Información del cliente/receptor
-  customerDocumentType     String?           // Tipo de documento del cliente (6=RUC, 1=DNI, etc.)
-  customerDocumentNumber   String?           // Número de documento del cliente
-  customerName             String?           // Nombre/razón social del cliente
-  customerAddress          String?           // Dirección del cliente
-  customerUbigeo          String?           // Código de ubigeo del cliente
-  customerDistrict        String?           // Distrito del cliente
-  customerProvince        String?           // Provincia del cliente
-  customerDepartment      String?           // Departamento del cliente
-  
-  // Información de retenciones y detracciones
-  hasRetention          Boolean           @default(false)
-  retentionAmount       Decimal?          @db.Decimal(12, 2)
-  retentionPercentage   Decimal?          @db.Decimal(5, 2)
-  hasDetraction         Boolean           @default(false)
-  detractionAmount      Decimal?          @db.Decimal(12, 2)
-  detractionCode        String?
-  detractionPercentage  Decimal?          @db.Decimal(5, 2)
-  detractionServiceCode String?           // Código del bien/servicio sujeto a detracción
-  detractionAccount     String?           // Cuenta de detracciones del proveedor
-  
-  // Información de formas de pago (como JSON o campos separados)
-  paymentMethod         String?           // "Contado", "Credito", etc.
-  creditAmount          Decimal?          @db.Decimal(12, 2) // Monto a crédito
-  creditDueDate         DateTime?         // Fecha de vencimiento del crédito
-  installmentAmount     Decimal?          @db.Decimal(12, 2) // Monto de cuota
-  installmentDueDate    DateTime?         // Fecha de vencimiento de cuota
-  paymentTermsJson      String?           // JSON con términos de pago complejos
-  
-  // Montos para conciliación
-  netPayableAmount      Decimal           @db.Decimal(12, 2) // Monto neto a pagar (total - retenciones - detracciones)
-  conciliatedAmount     Decimal           @db.Decimal(12, 2) @default(0) // Monto ya conciliado
-  pendingAmount         Decimal           @db.Decimal(12, 2) // Monto pendiente de conciliar
-  
-  description           String?
-  observations          String?
-  tags                  String[]
-  status                DocumentStatus    @default(PENDING)
-  
-  // Información del XML
-  xmlFileName           String?
-  xmlContent            String?           // Contenido completo del XML
-  xmlHash               String?           // Hash del XML para detectar duplicados
-  xmlUblVersion         String?           // Versión UBL del XML (ej: "2.1")
-  xmlCustomizationId    String?           // ID de customización (ej: "2.0")
-  documentTypeDescription String?         // Descripción del tipo de documento
-  
-  // Información SUNAT
-  sunatResponseCode     String?
-  cdrStatus             String?
-  sunatProcessDate      DateTime?
-  
-  // Información de firma digital
-  digitalSignatureId    String?           // ID de la firma digital
-  digitalSignatureUri   String?           // URI de la firma digital
-  certificateIssuer     String?           // Emisor del certificado
-  certificateSubject    String?           // Sujeto del certificado
-  signatureDate         DateTime?         // Fecha de firma
-  signatureValue        String?           // Valor de la firma (puede ser largo)
-  certificateData       String?           // Datos completos del certificado
-  canonicalizationMethod String?          // Método de canonicalización
-  signatureMethod       String?           // Método de firma
-  digestMethod          String?           // Método de digest
-  digestValue           String?           // Valor del digest
-  
-  // Archivos relacionados
-  pdfFile               String?           // Archivo PDF generado
-  qrCode                String?           // Código QR del documento
-  
-  // Información adicional de facturación
-  orderReference        String?           // Referencia de orden
-  contractNumber        String?           // Número de contrato
-  additionalNotes       String[]          // Notas adicionales del documento
-  
-  // Información adicional del XML (como JSON para flexibilidad)
-  xmlAdditionalData     String?           // JSON con datos adicionales del XML
-  
-  // Campos para manejar múltiples mensajes/notas del XML
-  documentNotes         String[]          // Array de notas del documento
-  operationNotes        String[]          // Notas de operación (ej: "Operación sujeta a detracción")
-  
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
-  createdById           String
-  updatedById           String?
-
-  // Relations
-  company               Company           @relation(fields: [companyId], references: [id])
-  supplier              Supplier          @relation(fields: [supplierId], references: [id])
-  createdBy             User              @relation("DocumentCreatedBy", fields: [createdById], references: [id])
-  updatedBy             User?             @relation("DocumentUpdatedBy", fields: [updatedById], references: [id])
-  lines                 DocumentLine[]    // Líneas de detalle del documento
-  expenses              Expense[]
-  conciliationItems     ConciliationItem[]
-
-  @@unique([companyId, series, number])
-  @@index([companyId, status])
-  @@index([companyId, issueDate])
-  @@index([supplierId])
-  @@index([xmlHash])
-  @@index([customerDocumentNumber])
-  @@index([paymentMethod])
-  @@index([hasDetraction])
-  @@map("documents")
-}
-
-model DocumentLine {
-  id                    String   @id @default(cuid())
-  documentId            String
-  lineNumber            Int
-  productCode           String?
-  description           String
-  quantity              Decimal  @db.Decimal(12, 4)
-  unitCode              String   @default("NIU")
-  unitPrice             Decimal  @db.Decimal(12, 4)
-  unitPriceWithTax      Decimal? @db.Decimal(12, 4)  // Precio unitario con impuestos
-  lineTotal             Decimal  @db.Decimal(12, 2)
-  
-  // Información tributaria por línea
-  igvAmount             Decimal? @db.Decimal(12, 2)
-  taxExemptionCode      String?  // Código de exención tributaria (10, 20, 30, etc.)
-  taxExemptionReason    String?  // Razón de exención tributaria
-  taxPercentage         Decimal? @db.Decimal(5, 2)
-  taxCategoryId         String?  // ID de categoría tributaria (S, E, O, etc.)
-  taxSchemeId           String?  // ID del esquema tributario (1000=IGV, 9998=INA, etc.)
-  taxSchemeName         String?  // Nombre del esquema tributario (IGV, INA, etc.)
-  taxTypeCode           String?  // Código del tipo de impuesto (VAT, FRE, etc.)
-  
-  // Información de precios
-  priceTypeCode         String?  // Código tipo de precio (01=Precio unitario, 02=Valor referencial, etc.)
-  referencePrice        Decimal? @db.Decimal(12, 4) // Precio de referencia (con impuestos)
-  
-  // Información adicional del item
-  itemClassificationCode String? // Código de clasificación del item (UNSPSC, etc.)
-  freeOfChargeIndicator Boolean  @default(false) // Indicador de gratuidad
-  
-  // Descuentos y cargos por línea
-  allowanceAmount       Decimal? @db.Decimal(12, 2) // Monto de descuento
-  allowanceIndicator    Boolean  @default(false)    // Indicador de descuento
-  chargeAmount          Decimal? @db.Decimal(12, 2) // Monto de cargo adicional
-  chargeIndicator       Boolean  @default(false)    // Indicador de cargo
-  
-  // Información adicional de la línea
-  orderLineReference    String?  // Referencia de línea de orden
-  lineNotes             String[] // Notas adicionales de la línea
-  
-  // Información específica para diferentes tipos de afectación
-  taxableAmount         Decimal? @db.Decimal(12, 2) // Monto gravado
-  exemptAmount          Decimal? @db.Decimal(12, 2) // Monto exonerado
-  inaffectedAmount      Decimal? @db.Decimal(12, 2) // Monto inafecto
-  
-  // Información adicional del XML de la línea (como JSON para flexibilidad)
-  xmlLineData           String?  // JSON con datos adicionales de la línea del XML
-  
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  // Relations
-  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  @@index([documentId, lineNumber])
-  @@map("document_lines")
-}
-
-
-// ============================================================================
-// BANK ACCOUNTS & TRANSACTIONS (Transacciones Bancarias Importadas)
-// ============================================================================
-
-enum BankAccountType {
-  CORRIENTE         // Cuenta corriente
-  AHORROS          // Cuenta de ahorros
-  PLAZO_FIJO       // Depósito a plazo fijo
-  CTS              // Cuenta CTS
-  DETRACCIONES     // Cuenta de detracciones
-  OTROS            // Otros tipos
-}
-
-model BankAccount {
-  id              String          @id @default(dbgenerated("'bank_' || substr(gen_random_uuid()::text, 1, 13)"))
-  companyId       String
-  company         Company         @relation(fields: [companyId], references: [id])
-  
-  // Información de la cuenta
-  bankName        String          // Nombre del banco
-  bankCode        String?         // Código del banco
-  accountNumber   String          // Número de cuenta
-  accountType     BankAccountType // Tipo de cuenta
-  currency        String          @default("PEN") // Moneda
-  
-  // Información adicional
-  alias           String?         // Alias o nombre descriptivo
-  description     String?         // Descripción
-  isActive        Boolean         @default(true)
-  
-  // Saldos
-  initialBalance  Decimal         @db.Decimal(15, 2) @default(0)
-  currentBalance  Decimal         @db.Decimal(15, 2) @default(0)
-  
-  // Timestamps
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  
-  // Relaciones
-  transactions    Transaction[]
-  conciliations   Conciliation[]
-  expenses        Expense[]
-  
-  @@unique([companyId, accountNumber])
-  @@map("bank_accounts")
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+  CANCELLED
 }
 
 enum TransactionType {
-  DEBIT             // Débito (salida de dinero)
-  CREDIT            // Crédito (entrada de dinero)
+  DEBIT
+  CREDIT
+  TRANSFER
+  FEE
+  INTEREST
 }
 
 enum TransactionStatus {
-  IMPORTED          // Importado del archivo bancario
-  PENDING           // Pendiente de conciliación
-  CONCILIATED       // Conciliado con documento
-  PARTIALLY_CONCILIATED // Parcialmente conciliado
-  EXCLUDED          // Excluido de conciliación (ej: ITF, comisiones)
+  PENDING
+  PROCESSED
+  RECONCILED
+  CANCELLED
 }
 
-// Tabla principal para transacciones bancarias importadas (simplificada)
-model Transaction {
-  id                String         @id @default(dbgenerated("'txn_' || substr(gen_random_uuid()::text, 1, 13)"))
-  companyId         String
-  company           Company        @relation(fields: [companyId], references: [id])
-  
-  // Información de la cuenta bancaria
-  bankAccountId     String
-  bankAccount       BankAccount    @relation(fields: [bankAccountId], references: [id])
-  
-  // Datos de la transacción bancaria (del Excel)
-  transactionDate   DateTime       // Fecha de la transacción
-  valueDate         DateTime?      // Fecha valor
-  description       String         // Descripción de la operación
-  transactionType   TransactionType // Débito o Crédito
-  amount            Decimal        @db.Decimal(15, 2) // Monto (siempre positivo)
-  balance           Decimal        @db.Decimal(15, 2) // Saldo después de la transacción
-  
-  // Información adicional del banco
-  branch            String?        // Sucursal
-  operationNumber   String         // Número de operación (único por cuenta)
-  operationTime     String?        // Hora de la operación
-  operatorUser      String?        // Usuario que realizó la operación
-  utc               String?        // UTC
-  reference         String?        // Referencia adicional
-  channel           String?        // Canal (Online, ATM, Sucursal, etc.)
-  
-  // Información de importación simplificada
-  fileName          String?        // Nombre del archivo importado
-  importedAt        DateTime       @default(now()) // Fecha de importación
-  
-  // Clasificación automática
-  isITF             Boolean        @default(false) // Es Impuesto a las Transacciones Financieras
-  isDetraction      Boolean        @default(false) // Es detracción masiva
-  isBankFee         Boolean        @default(false) // Es comisión bancaria
-  isTransfer        Boolean        @default(false) // Es transferencia
-  
-  // Relación con proveedores (inferida)
-  supplierId        String?
-  supplier          Supplier?      @relation(fields: [supplierId], references: [id])
-  
-  // Estado de conciliación
-  status            TransactionStatus @default(IMPORTED)
-  conciliatedAmount Decimal        @db.Decimal(15, 2) @default(0) // Monto ya conciliado
-  pendingAmount     Decimal        @db.Decimal(15, 2) // Monto pendiente de conciliar
-  
-  // Hash único para evitar duplicados
-  transactionHash   String         // Hash basado en cuenta + fecha + monto + operación
-  
-  // Timestamps
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  
-  // Relaciones
- 
-  
-  @@unique([bankAccountId, operationNumber, transactionDate,balance]) // Evitar duplicados
-  @@unique([transactionHash]) // Hash único
-  @@index([companyId, bankAccountId])
-  @@index([companyId, transactionDate])
-  @@index([companyId, status])
-  @@index([bankAccountId, transactionDate])
-  @@index([supplierId])
-  @@map("transactions")
-  conciliation Conciliation[]
+enum ConciliationType {
+  DOCUMENTS
+  DETRACTIONS
 }
-// ============================================================================
-// CONCILIATION (Proceso de Conciliación)
-// ============================================================================
 
 enum ConciliationStatus {
-  PENDING           // Pendiente
-  IN_PROGRESS       // En proceso
-  COMPLETED         // Completada
-  REVIEWED          // Revisada
-  APPROVED          // Aprobada
-}
-
-model Conciliation {
-  id              String              @id @default(dbgenerated("'conc_' || substr(gen_random_uuid()::text, 1, 13)"))
-  companyId       String
-  company         Company             @relation(fields: [companyId], references: [id])
-  
-  // Información de la conciliación
-  bankAccountId   String
-  bankAccount     BankAccount         @relation(fields: [bankAccountId], references: [id])
-  
-  // NUEVO: Relación directa con una única transacción
-  transactionId   String              @unique // Relación 1:1 con una transacción
-  transaction     Transaction         @relation(fields: [transactionId], references: [id])
-  
-  // Período de conciliación
-  periodStart     DateTime            // Fecha inicio del período
-  periodEnd       DateTime            // Fecha fin del período
-  
-  // Resumen de la conciliación
-  totalDocuments    Int              @default(0) // Total de documentos conciliados
-  conciliatedItems  Int              @default(0) // Items conciliados
-  pendingItems      Int              @default(0) // Items pendientes
-  
-  // Saldos
-  bankBalance     Decimal             @db.Decimal(15, 2) // Saldo según banco (de la transacción)
-  bookBalance     Decimal             @db.Decimal(15, 2) // Saldo según libros
-  difference      Decimal             @db.Decimal(15, 2) // Diferencia
-  
-  // Tolerancia aplicada
-  toleranceAmount Decimal?            @db.Decimal(10, 2) @default(0) // Tolerancia usada
-  
-  // Estado y proceso
-  status          ConciliationStatus @default(PENDING)
-  
-  // Información de auditoría
-  createdById     String
-  createdBy       User                @relation(fields: [createdById], references: [id])
-  
-  // Timestamps
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  completedAt     DateTime?           // Fecha de finalización
-  
-  // Relaciones
-  items           ConciliationItem[]
-  
-  @@index([companyId, bankAccountId])
-  @@index([companyId, periodStart, periodEnd])
-  @@index([transactionId]) // Nuevo índice para la transacción
-  @@map("conciliations")
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
 }
 
 enum ConciliationItemType {
-  DOCUMENT_TRANSACTION  // Documento conciliado con transacción
-  DOCUMENT_ONLY         // Documento sin transacción (pendiente de pago)
-  ADJUSTMENT            // Ajuste manual
+  DOCUMENT
+  TRANSACTION
+  ADJUSTMENT
 }
 
 enum ConciliationItemStatus {
-  MATCHED           // Conciliado perfectamente
-  PARTIAL_MATCH     // Conciliación parcial (diferencias menores)
-  UNMATCHED         // No conciliado
-  PENDING           // Pendiente de revisión
-  DISPUTED          // En disputa
-  EXCLUDED          // Excluido de conciliación
-}
-
-model ConciliationItem {
-  id                String                    @id @default(dbgenerated("'conc_item_' || substr(gen_random_uuid()::text, 1, 13)"))
-  conciliationId    String
-  conciliation      Conciliation              @relation(fields: [conciliationId], references: [id])
-  
-  // Tipo de conciliación
-  itemType          ConciliationItemType
-  
-  // Referencias a documento (la transacción ahora está en la conciliación)
-  documentId        String
-  document          Document                  @relation(fields: [documentId], references: [id])
-  
-  // Información del item
-  documentAmount    Decimal                   @db.Decimal(15, 2) // Monto del documento
-  conciliatedAmount Decimal                   @db.Decimal(15, 2) // Monto conciliado
-  difference        Decimal                   @db.Decimal(15, 2) @default(0) // Diferencia
-  
-  // Distribución proporcional
-  distributionPercentage Decimal?             @db.Decimal(5, 4) // % del total que representa
-  
-  // Información de detracciones y retenciones aplicadas
-  detractionAmount  Decimal?                  @db.Decimal(15, 2)
-  retentionAmount   Decimal?                  @db.Decimal(15, 2)
-  
-  // Estado de conciliación
-  status            ConciliationItemStatus    @default(PENDING)
-  
-  // Observaciones y notas
-  notes             String?
-  systemNotes       String?                   // Notas generadas automáticamente
-  
-  // Información de auditoría
-  conciliatedBy     String
-  
-  // Timestamps
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
-  
-  @@index([conciliationId])
-  @@index([documentId])
-  @@map("conciliation_items")
-}
-
-// ============================================================================
-// EXPENSES MANAGEMENT (Archivo de Gastos para Contabilidad)
-// ============================================================================
-
-enum ExpenseStatus {
-  IMPORTED          // Importado del Excel
-  PROCESSED         // Procesado y clasificado
-  CONCILIATED       // Conciliado con documento/transacción
-  EXPORTED          // Exportado a sistema contable
+  PENDING
+  MATCHED
+  PARTIAL
+  UNMATCHED
 }
 
 enum ExpenseType {
-  BANK_TRANSACTION  // Transacción bancaria
-  ITF               // Impuesto a las transacciones financieras
-  DETRACTION        // Detracción masiva
-  PAYMENT           // Pago a proveedor
-  SERVICE           // Pago de servicios
-  RENT              // Alquiler
-  UTILITIES         // Servicios públicos
-  BANK_FEE          // Comisión bancaria
-  OTHER             // Otros
+  OPERATIONAL
+  ADMINISTRATIVE
+  FINANCIAL
+  TAX
+  OTHER
 }
 
-model Expense {
-  id                String         @id @default(dbgenerated("'exp_' || substr(gen_random_uuid()::text, 1, 13)"))
-  companyId         String
-  company           Company        @relation(fields: [companyId], references: [id])
-  
-  // Información del archivo de gastos (línea del Excel)
-  lineNumber        Int            // No (correlativo de línea)
-  bankAccountId     String         // Cuenta bancaria de origen
-  bankAccount       BankAccount    @relation(fields: [bankAccountId], references: [id])
-  
-  // Datos del movimiento bancario original (copiados de Transaction)
-  transactionDate   DateTime       // Fecha del movimiento
-  valueDate         DateTime?      // Fecha valuta
-  operationDesc     String         // Descripción operación
-  amount            Decimal        @db.Decimal(15, 2) // Monto (negativo para gastos)
-  balance           Decimal        @db.Decimal(15, 2) // Saldo después del movimiento
-  branch            String?        // Sucursal - agencia
-  operationNumber   String         // Operación - Número
-  operationTime     String?        // Operación - Hora
-  user              String?        // Usuario que realizó la operación
-  utc               String?        // UTC
-  reference2        String?        // Referencia2
-  
-  // Clasificación contable (del archivo de gastos)
-  documentType      String?        // Tipo de documento (I-Banco, IR, R-Servicio, etc.)
-  fiscalFolio       String?        // Folio Fiscal (Serie-Número del documento)
-  supplierName      String?        // Proveedor (nombre)
-  concept           String?        // Concepto
-  totalAmount       Decimal?       @db.Decimal(15, 2) // Total
-  subtotal          Decimal?       @db.Decimal(15, 2) // Subtotal
-  igv               Decimal?       @db.Decimal(15, 2) // IGV
-  isr               Decimal?       @db.Decimal(15, 2) // ISR (Retención de 4ta)
-  
-  // Clasificación organizacional
-  discipline        String?        // Disciplina
-  location          String?        // Location
-  generalCategory   String?        // General
-  type              String?        // Tipo
-  account           String?        // Cuenta
-  subAccount        String?        // Subcuenta
-  accountingMonth   String?        // Mes Contable
-  accountingAccount String?        // Cuenta Contable
-  comments          String?        // Comentarios
-  
-  // Información del proveedor
-  supplierRuc       String?        // RUC
-  documentDate      DateTime?      // Fecha de comprobante
-  issueDate         DateTime?      // Emisión de comprobante
-  dueDate           DateTime?      // Fecha de Vencimiento
-  isMassive         Boolean        @default(false) // Masivo
-  
-  // Clasificación automática
-  expenseType       ExpenseType    // Tipo de gasto inferido
-  currency          String         @default("PEN") // Moneda
-  
-  // Referencias a otras entidades (resultado de la conciliación)
-  supplierId        String?        // Proveedor relacionado
-  supplier          Supplier?      @relation(fields: [supplierId], references: [id])
-  documentId        String?        // Documento relacionado
-  document          Document?      @relation(fields: [documentId], references: [id])
-  
-  // Estado del procesamiento
-  status            ExpenseStatus  @default(IMPORTED)
-  
-  // Información de importación simplificada
-  originalFileName  String?        // Nombre del archivo Excel original
-  rowHash           String?        // Hash de la fila para evitar duplicados
-  
-  // Auditoría
-  importedAt        DateTime       @default(now())
-  importedById      String
-  importedBy        User           @relation("ExpenseImportedBy", fields: [importedById], references: [id])
-  processedAt       DateTime?
-  processedById     String?
-  processedBy       User?          @relation("ExpenseProcessedBy", fields: [processedById], references: [id])
-  reconciledAt      DateTime?
-  reconciledById    String?
-  reconciledBy      User?          @relation("ExpenseReconciledBy", fields: [reconciledById], references: [id])
-  
-  // Timestamps
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  
-  @@unique([bankAccountId, operationNumber, transactionDate, amount]) // Evitar duplicados
-  @@index([companyId, status])
-  @@index([companyId, transactionDate])
-  @@index([companyId, expenseType])
-  @@index([bankAccountId, transactionDate])
-  @@index([supplierId])
-  @@index([documentId])
-  @@map("expenses")
+enum ExpenseStatus {
+  IMPORTED
+  PROCESSED
+  RECONCILED
+  REJECTED
 }
-
-// ============================================================================
-// AUDIT & LOGGING
-// ============================================================================
 
 enum AuditAction {
   CREATE
@@ -769,53 +131,892 @@ enum AuditAction {
   LOGOUT
   EXPORT
   IMPORT
-  CONCILIATE        // Cambio de RECONCILE a CONCILIATE
-  APPROVE
-  REJECT
-}
-
-model AuditLog {
-  id          String      @id @default(dbgenerated("'audit_' || substr(gen_random_uuid()::text, 1, 13)"))
-  
-  // Usuario que realizó la acción
-  userId      String
-  user        User        @relation(fields: [userId], references: [id])
-  
-  // Información de la acción
-  action      AuditAction
-  entity      String      // Nombre de la entidad afectada
-  entityId    String?     // ID de la entidad afectada
-  
-  // Detalles
-  description String      // Descripción de la acción
-  oldValues   Json?       // Valores anteriores (para updates)
-  newValues   Json?       // Valores nuevos
-  
-  // Información de contexto
-  ipAddress   String?     // Dirección IP
-  userAgent   String?     // User agent del navegador
-  
-  // Timestamp
-  createdAt   DateTime    @default(now())
-  
-  @@index([userId])
-  @@index([entity, entityId])
-  @@index([createdAt])
-  @@map("audit_logs")
 }
 
 // ============================================================================
-// SYSTEM CONFIGURATION
+// CORE MODELS
 // ============================================================================
 
-model SystemConfig {
-  id          String   @id @default(cuid())
-  key         String   @unique // Clave de configuración
-  value       Json     // Valor de configuración
-  description String?  // Descripción de la configuración
-  
+model User {
+  id                   String    @id @default(dbgenerated("'us_' || substr(gen_random_uuid()::text, 1, 13)"))
+  email                String    @unique
+  emailVerified        DateTime?
+  password             String?
+  image                String?
+  firstName            String?
+  lastName             String?
+  role                 UserRole  @default(VIEWER)
+  authProvider         AuthProvider @default(EMAIL)
+  authProviderId       String?
+  accessToken          String?
+  refreshToken         String?
+  tokenExpiresAt       DateTime?
+  phone                String?
+  bio                  String?
+  preferences          Json?
+  lastLogin            DateTime?
+  failedLoginAttempts  Int       @default(0)
+  lockedUntil          DateTime?
+  isActive             Boolean   @default(true)
+  companyId            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  // Relations
+  company              Company?   @relation(fields: [companyId], references: [id])
+  sessions             Session[]
+  auditLogs            AuditLog[]
+  documentsCreated     Document[] @relation("DocumentCreatedBy")
+  documentsUpdated     Document[] @relation("DocumentUpdatedBy")
+  conciliationsCreated Conciliation[] @relation("ConciliationCreatedBy")
+  conciliationsApproved Conciliation[] @relation("ConciliationApprovedBy")
+  expensesImported     Expense[] @relation("ExpenseImportedBy")
+  expensesProcessed    Expense[] @relation("ExpenseProcessedBy")
+  expensesReconciled   Expense[] @relation("ExpenseReconciledBy")
+  sunatRheUploads      SunatRhe[]
+  sunatInvoicesManaged SunatInvoice[]
+
+  @@map("users")
+}
+
+model Session {
+  id           String  @id @default(dbgenerated("'sess_' || substr(gen_random_uuid()::text, 1, 13)"))
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Company {
+  id        String   @id @default(dbgenerated("'cmp_' || substr(gen_random_uuid()::text, 1, 13)"))
+  name      String
+  tradeName String?
+  ruc       String   @unique
+  address   String?
+  phone     String?
+  email     String?
+  website   String?
+  logo      String?
+  settings  Json?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users                    User[]
+  suppliers                Supplier[]
+  documents                Document[]
+  bankAccounts             BankAccount[]
+  transactions             Transaction[]
+  expenses                 Expense[]
+  accountingAccounts       AccountingAccount[]
+  costCenters              CostCenter[]
+  conciliations            Conciliation[]
+  sunatRhe                 SunatRhe[]
+  sunatInvoices            SunatInvoice[]
+  expenseCategories        ExpenseCategory[]
+
+  @@map("companies")
+  AuditLog AuditLog[]
+}
+
+// ============================================================================
+// ACCOUNTING MODELS
+// ============================================================================
+
+model AccountingAccount {
+  id              String  @id @default(dbgenerated("'aa_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId       String
+  accountCode     String
+  accountName     String
+  accountType     String
+  parentAccountId String?
+  level           Int     @default(1)
+  isActive        Boolean @default(true)
+  description     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  company                    Company @relation(fields: [companyId], references: [id])
+  parentAccount              AccountingAccount? @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
+  childAccounts              AccountingAccount[] @relation("AccountHierarchy")
+  documentAccountLinks       DocumentAccountLink[]
+  documentLineAccountLinks   DocumentLineAccountLink[]
+  conciliationExpenses       ConciliationExpense[]
+
+  @@unique([companyId, accountCode])
+  @@map("accounting_accounts")
+}
+
+model CostCenter {
+  id                 String  @id @default(dbgenerated("'cc_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId          String
+  code               String
+  name               String
+  description        String?
+  parentCostCenterId String?
+  level              Int     @default(1)
+  isActive           Boolean @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Relations
+  company                       Company @relation(fields: [companyId], references: [id])
+  parentCostCenter              CostCenter? @relation("CostCenterHierarchy", fields: [parentCostCenterId], references: [id])
+  childCostCenters              CostCenter[] @relation("CostCenterHierarchy")
+  documentCostCenterLinks       DocumentCostCenterLink[]
+  documentLineCostCenterLinks   DocumentLineCostCenterLink[]
+
+  @@unique([companyId, code])
+  @@map("cost_centers")
+}
+
+// ============================================================================
+// NORMALIZED MODELS
+// ============================================================================
+
+model ExpenseCategory {
+  id                String   @id @default(dbgenerated("'ec_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId         String
+  discipline        String?
+  location          String?
+  generalCategory   String?
+  type              String?
+  account           String?
+  subAccount        String?
+  accountingAccount String?
+  description       String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  company  Company   @relation(fields: [companyId], references: [id])
+  expenses Expense[]
+
+  @@map("expense_categories")
+}
+
+model TaxScheme {
+  id             String   @id @default(dbgenerated("'ts_' || substr(gen_random_uuid()::text, 1, 13)"))
+  taxSchemeId    String   @unique
+  taxSchemeName  String
+  taxCategoryId  String?
+  taxTypeCode    String?
+  taxPercentage  Decimal? @db.Decimal(5, 4)
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  documentLines DocumentLine[]
+
+  @@map("tax_schemes")
+}
+
+// ============================================================================
+// SUPPLIER MODELS
+// ============================================================================
+
+model Supplier {
+  id               String         @id @default(dbgenerated("'spp_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId        String
+  businessName     String
+  tradeName        String?
+  documentType     String
+  documentNumber   String
+  supplierType     SupplierType
+  email            String?
+  phone            String?
+  address          String?
+  district         String?
+  province         String?
+  department       String?
+  country          String?        @default("PE")
+  status           SupplierStatus @default(ACTIVE)
+  creditLimit      Decimal?       @db.Decimal(15, 2)
+  paymentTerms     Int?
+  taxCategory      String?
+  isRetentionAgent Boolean        @default(false)
+  retentionRate    Decimal?       @db.Decimal(5, 4)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  // Relations
+  company            Company               @relation(fields: [companyId], references: [id])
+  documents          Document[]
+  transactions       Transaction[]
+  expenses           Expense[]
+  supplierBankAccounts SupplierBankAccount[]
+
+  @@unique([companyId, documentNumber])
+  @@map("suppliers")
+}
+
+model SupplierBankAccount {
+  id            String          @id @default(dbgenerated("'sba_' || substr(gen_random_uuid()::text, 1, 13)"))
+  supplierId    String
+  bankId        String
+  accountNumber String
+  accountType   BankAccountType
+  currency      String
+  isDefault     Boolean         @default(false)
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // Relations
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  bank        Bank     @relation(fields: [bankId], references: [id])
+  currencyRef Currency @relation(fields: [currency], references: [code])
+
+  @@map("supplier_bank_accounts")
+}
+
+// ============================================================================
+// DOCUMENT MODELS
+// ============================================================================
+
+model Document {
+  id                    String         @id @default(dbgenerated("'doc_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId             String
+  documentType          DocumentType
+  series                String
+  number                String
+  fullNumber            String
+  supplierId            String
+  issueDate             DateTime
+  issueTime             String?
+  dueDate               DateTime?
+  receptionDate         DateTime?
+  currency              String
+  exchangeRate          Decimal        @default(1) @db.Decimal(10, 6)
+  subtotal              Decimal        @db.Decimal(15, 2)
+  igv                   Decimal        @db.Decimal(15, 2)
+  otherTaxes            Decimal        @default(0) @db.Decimal(15, 2)
+  total                 Decimal        @db.Decimal(15, 2)
+  hasRetention          Boolean        @default(false)
+  retentionAmount       Decimal        @default(0) @db.Decimal(15, 2)
+  retentionPercentage   Decimal        @default(0) @db.Decimal(5, 4)
+  netPayableAmount      Decimal        @db.Decimal(15, 2)
+  conciliatedAmount     Decimal        @default(0) @db.Decimal(15, 2)
+  pendingAmount         Decimal        @db.Decimal(15, 2)
+  paymentMethod         String?
+  description           String?
+  observations          String?
+  tags                  String?
+  status                DocumentStatus @default(PENDING)
+  orderReference        String?
+  contractNumber        String?
+  additionalNotes       String?
+  documentNotes         String?
+  operationNotes        String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  createdById           String
+  updatedById           String
+
+  // Relations
+  company                   Company                     @relation(fields: [companyId], references: [id])
+  supplier                  Supplier                    @relation(fields: [supplierId], references: [id])
+  currencyRef               Currency                    @relation(fields: [currency], references: [code])
+  createdBy                 User                        @relation("DocumentCreatedBy", fields: [createdById], references: [id])
+  updatedBy                 User                        @relation("DocumentUpdatedBy", fields: [updatedById], references: [id])
+  xmlData                   DocumentXmlData?
+  digitalSignature          DocumentDigitalSignature?
+  detraction                DocumentDetraction?
+  lines                     DocumentLine[]
+  paymentTerms              DocumentPaymentTerm[]
+  accountLinks              DocumentAccountLink[]
+  costCenterLinks           DocumentCostCenterLink[]
+  conciliationItems         ConciliationItem[]
+  supportedExpenses         Expense[]
+
+  @@unique([companyId, fullNumber])
+  @@map("documents")
+}
+
+model DocumentXmlData {
+  id                      String   @id @default(dbgenerated("'xml_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentId              String   @unique
+  xmlFileName             String?
+  xmlContent              String?
+  xmlHash                 String?
+  xmlUblVersion           String?
+  xmlCustomizationId      String?
+  documentTypeDescription String?
+  sunatResponseCode       String?
+  cdrStatus               String?
+  sunatProcessDate        DateTime?
+  pdfFile                 String?
+  qrCode                  String?
+  xmlAdditionalData       String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  // Relations
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_xml_data")
+}
+
+model DocumentDigitalSignature {
+  id                      String   @id @default(dbgenerated("'dds_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentId              String   @unique
+  digitalSignatureId      String?
+  digitalSignatureUri     String?
+  certificateIssuer       String?
+  certificateSubject      String?
+  signatureDate           DateTime?
+  signatureValue          String?
+  certificateData         String?
+  canonicalizationMethod  String?
+  signatureMethod         String?
+  digestMethod            String?
+  digestValue             String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  // Relations
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_digital_signatures")
+}
+
+model DocumentPaymentTerm {
+  id          String   @id @default(dbgenerated("'dpt_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentId  String
+  termNumber  Int
+  amount      Decimal  @db.Decimal(15, 2)
+  dueDate     DateTime
+  description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Relations
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_payment_terms")
+}
+
+model DocumentDetraction {
+  id                         String   @id @default(dbgenerated("'ddtr_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentId                 String   @unique
+  hasDetraction              Boolean  @default(false)
+  amount                     Decimal  @default(0) @db.Decimal(15, 2)
+  code                       String?
+  percentage                 Decimal  @default(0) @db.Decimal(5, 4)
+  serviceCode                String?
+  account                    String?
+  paymentDate                DateTime?
+  paymentReference           String?
+  isConciliated              Boolean  @default(false)
+  conciliatedAmount          Decimal  @default(0) @db.Decimal(15, 2)
+  pendingAmount              Decimal  @default(0) @db.Decimal(15, 2)
+  conciliationId             String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  // Relations
+  document                   Document                    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  conciliation               Conciliation?               @relation(fields: [conciliationId], references: [id])
+
+  @@map("document_detractions")
+}
+
+model DocumentLine {
+  id                        String   @id @default(dbgenerated("'dline_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentId                String
+  lineNumber                Int
+  productCode               String?
+  description               String
+  quantity                  Decimal  @db.Decimal(15, 6)
+  unitCode                  String?
+  unitPrice                 Decimal  @db.Decimal(15, 6)
+  unitPriceWithTax          Decimal  @db.Decimal(15, 6)
+  lineTotal                 Decimal  @db.Decimal(15, 2)
+  igvAmount                 Decimal  @default(0) @db.Decimal(15, 2)
+  taxExemptionCode          String?
+  taxExemptionReason        String?
+  taxSchemeId               String?
+  priceTypeCode             String?
+  referencePrice            Decimal? @db.Decimal(15, 6)
+  itemClassificationCode    String?
+  freeOfChargeIndicator     Boolean  @default(false)
+  allowanceAmount           Decimal  @default(0) @db.Decimal(15, 2)
+  allowanceIndicator        Boolean  @default(false)
+  chargeAmount              Decimal  @default(0) @db.Decimal(15, 2)
+  chargeIndicator           Boolean  @default(false)
+  orderLineReference        String?
+  lineNotes                 String?
+  taxableAmount             Decimal  @default(0) @db.Decimal(15, 2)
+  exemptAmount              Decimal  @default(0) @db.Decimal(15, 2)
+  inaffectedAmount          Decimal  @default(0) @db.Decimal(15, 2)
+  xmlLineData               String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  // Relations
+  document                  Document                      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  taxScheme                 TaxScheme?                    @relation(fields: [taxSchemeId], references: [id])
+  accountLinks              DocumentLineAccountLink[]
+  costCenterLinks           DocumentLineCostCenterLink[]
+
+  @@map("document_lines")
+}
+
+// ============================================================================
+// LINKING MODELS
+// ============================================================================
+
+model DocumentAccountLink {
+  id         String   @id @default(dbgenerated("'dal_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentId String
+  accountId  String
+  percentage Decimal  @db.Decimal(5, 4)
+  amount     Decimal  @db.Decimal(15, 2)
+  createdAt  DateTime @default(now())
+
+  // Relations
+  document Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  account  AccountingAccount @relation(fields: [accountId], references: [id])
+
+  @@map("document_account_links")
+}
+
+model DocumentLineAccountLink {
+  id             String   @id @default(dbgenerated("'dlal_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentLineId String
+  accountId      String
+  percentage     Decimal  @db.Decimal(5, 4)
+  amount         Decimal  @db.Decimal(15, 2)
+  createdAt      DateTime @default(now())
+
+  // Relations
+  documentLine DocumentLine       @relation(fields: [documentLineId], references: [id], onDelete: Cascade)
+  account      AccountingAccount  @relation(fields: [accountId], references: [id])
+
+  @@map("document_line_account_links")
+}
+
+model DocumentCostCenterLink {
+  id           String   @id @default(dbgenerated("'dcc_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentId   String
+  costCenterId String
+  percentage   Decimal  @db.Decimal(5, 4)
+  amount       Decimal  @db.Decimal(15, 2)
+  createdAt    DateTime @default(now())
+
+  // Relations
+  document   Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  costCenter CostCenter @relation(fields: [costCenterId], references: [id])
+
+  @@map("document_cost_center_links")
+}
+
+model DocumentLineCostCenterLink {
+  id             String   @id @default(dbgenerated("'dlcc_' || substr(gen_random_uuid()::text, 1, 13)"))
+  documentLineId String
+  costCenterId   String
+  percentage     Decimal  @db.Decimal(5, 4)
+  amount         Decimal  @db.Decimal(15, 2)
+  createdAt      DateTime @default(now())
+
+  // Relations
+  documentLine DocumentLine @relation(fields: [documentLineId], references: [id], onDelete: Cascade)
+  costCenter   CostCenter   @relation(fields: [costCenterId], references: [id])
+
+  @@map("document_line_cost_center_links")
+}
+
+// ============================================================================
+// BANKING MODELS
+// ============================================================================
+
+model BankAccount {
+  id              String          @id @default(dbgenerated("'bkacc_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId       String
+  bankId          String
+  accountNumber   String
+  accountType     BankAccountType
+  currency        String
+  alias           String?
+  description     String?
+  isActive        Boolean         @default(true)
+  initialBalance  Decimal         @default(0) @db.Decimal(15, 2)
+  currentBalance  Decimal         @default(0) @db.Decimal(15, 2)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  company                 Company                   @relation(fields: [companyId], references: [id])
+  bank                    Bank                      @relation(fields: [bankId], references: [id])
+  currencyRef             Currency                  @relation(fields: [currency], references: [code])
+  transactions            Transaction[]
+  conciliations           Conciliation[]
+  expenses                Expense[]
+
+  @@unique([companyId, bankId, accountNumber])
+  @@map("bank_accounts")
+}
+
+model Transaction {
+  id                  String            @id @default(dbgenerated("'tran_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId           String
+  bankAccountId       String
+  transactionDate     DateTime
+  valueDate           DateTime?
+  description         String
+  transactionType     TransactionType
+  amount              Decimal           @db.Decimal(15, 2)
+  balance             Decimal           @db.Decimal(15, 2)
+  branch              String?
+  operationNumber     String?
+  operationTime       String?
+  operatorUser        String?
+  utc                 String?
+  reference           String?
+  channel             String?
+  fileName            String?
+  importedAt          DateTime?
+  isITF               Boolean           @default(false)
+  isDetraction        Boolean           @default(false)
+  isBankFee           Boolean           @default(false)
+  isTransfer          Boolean           @default(false)
+  supplierId          String?
+  status              TransactionStatus @default(PENDING)
+  conciliatedAmount   Decimal           @default(0) @db.Decimal(15, 2)
+  pendingAmount       Decimal           @db.Decimal(15, 2)
+  transactionHash     String            @unique
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  // Relations
+  company                 Company                   @relation(fields: [companyId], references: [id])
+  bankAccount             BankAccount               @relation(fields: [bankAccountId], references: [id])
+  supplier                Supplier?                 @relation(fields: [supplierId], references: [id])
+  conciliations           Conciliation[]
+
+  @@map("transactions")
+}
+
+// ============================================================================
+// UNIFIED CONCILIATION MODEL
+// ============================================================================
+
+model Conciliation {
+  id                      String              @id @default(dbgenerated("'conc_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId               String
+  bankAccountId           String
+  transactionId           String?
+  type                    ConciliationType    @default(DOCUMENTS)
+  reference               String?
+  periodStart             DateTime
+  periodEnd               DateTime
+  totalDocuments          Int                 @default(0)
+  conciliatedItems        Int                 @default(0)
+  pendingItems            Int                 @default(0)
+  bankBalance             Decimal             @db.Decimal(15, 2)
+  bookBalance             Decimal             @db.Decimal(15, 2)
+  difference              Decimal             @db.Decimal(15, 2)
+  toleranceAmount         Decimal             @default(0) @db.Decimal(15, 2)
+  status                  ConciliationStatus  @default(PENDING)
+  additionalExpensesTotal Decimal             @default(0) @db.Decimal(15, 2)
+  totalAmount             Decimal?            @db.Decimal(15, 2)
+  paymentDate             DateTime?
+  paymentAmount           Decimal?            @db.Decimal(15, 2)
+  notes                   String?
+  createdById             String
+  approvedById            String?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  completedAt             DateTime?
+
+  // Relations
+  company         Company             @relation(fields: [companyId], references: [id])
+  bankAccount     BankAccount         @relation(fields: [bankAccountId], references: [id])
+  transaction     Transaction?        @relation(fields: [transactionId], references: [id])
+  createdBy       User                @relation("ConciliationCreatedBy", fields: [createdById], references: [id])
+  approvedBy      User?               @relation("ConciliationApprovedBy", fields: [approvedById], references: [id])
+  items           ConciliationItem[]
+  expenses        ConciliationExpense[]
+  documentDetractions DocumentDetraction[]
+
+  @@map("conciliations")
+}
+
+model ConciliationItem {
+  id                     String                    @id @default(dbgenerated("'citem_' || substr(gen_random_uuid()::text, 1, 13)"))
+  conciliationId         String
+  itemType               ConciliationItemType
+  documentId             String?
+  documentAmount         Decimal                   @db.Decimal(15, 2)
+  conciliatedAmount      Decimal                   @db.Decimal(15, 2)
+  difference             Decimal                   @db.Decimal(15, 2)
+  distributionPercentage Decimal                   @default(100) @db.Decimal(5, 4)
+  detractionAmount       Decimal                   @default(0) @db.Decimal(15, 2)
+  retentionAmount        Decimal                   @default(0) @db.Decimal(15, 2)
+  status                 ConciliationItemStatus    @default(PENDING)
+  notes                  String?
+  systemNotes            String?
+  conciliatedBy          String?
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+
+  // Relations
+  conciliation Conciliation @relation(fields: [conciliationId], references: [id], onDelete: Cascade)
+  document     Document?    @relation(fields: [documentId], references: [id])
+
+  @@map("conciliation_items")
+}
+
+model ConciliationExpense {
+  id                 String      @id @default(dbgenerated("'cexp_' || substr(gen_random_uuid()::text, 1, 13)"))
+  conciliationId     String
+  description        String
+  amount             Decimal     @db.Decimal(15, 2)
+  expenseType        ExpenseType
+  accountId          String?
+  notes              String?
+  isTaxDeductible    Boolean     @default(true)
+  supportingDocument String?
+  expenseDate        DateTime
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  // Relations
+  conciliation Conciliation       @relation(fields: [conciliationId], references: [id], onDelete: Cascade)
+  account      AccountingAccount? @relation(fields: [accountId], references: [id])
+
+  @@map("conciliation_expenses")
+}
+
+// ============================================================================
+// EXPENSE MODEL (NORMALIZED)
+// ============================================================================
+
+model Expense {
+  id                String        @id @default(dbgenerated("'exp_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId         String
+  lineNumber        Int?
+  bankAccountId     String?
+  transactionDate   DateTime
+  valueDate         DateTime?
+  operationDesc     String?
+  amount            Decimal       @db.Decimal(15, 2)
+  balance           Decimal?      @db.Decimal(15, 2)
+  branch            String?
+  operationNumber   String?
+  operationTime     String?
+  user              String?
+  utc               String?
+  reference2        String?
+  documentType      String?
+  fiscalFolio       String?
+  concept           String?
+  totalAmount       Decimal?      @db.Decimal(15, 2)
+  subtotal          Decimal?      @db.Decimal(15, 2)
+  igv               Decimal?      @db.Decimal(15, 2)
+  isr               Decimal?      @db.Decimal(15, 2)
+  accountingMonth   String?
+  comments          String?
+  documentDate      DateTime?
+  issueDate         DateTime?
+  dueDate           DateTime?
+  isMassive         Boolean       @default(false)
+  expenseType       ExpenseType
+  currency          String
+  supplierId        String?
+  documentId        String?
+  expenseCategoryId String?
+  status            ExpenseStatus @default(IMPORTED)
+  originalFileName  String?
+  rowHash           String?
+  importedAt        DateTime?
+  importedById      String?
+  processedAt       DateTime?
+  processedById     String?
+  reconciledAt      DateTime?
+  reconciledById    String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  company         Company          @relation(fields: [companyId], references: [id])
+  bankAccount     BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  currencyRef     Currency         @relation(fields: [currency], references: [code])
+  supplier        Supplier?        @relation(fields: [supplierId], references: [id])
+  document        Document?        @relation(fields: [documentId], references: [id])
+  expenseCategory ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id])
+  importedBy      User?            @relation("ExpenseImportedBy", fields: [importedById], references: [id])
+  processedBy     User?            @relation("ExpenseProcessedBy", fields: [processedById], references: [id])
+  reconciledBy    User?            @relation("ExpenseReconciledBy", fields: [reconciledById], references: [id])
+
+  @@map("expenses")
+}
+
+// ============================================================================
+// REFERENCE MODELS
+// ============================================================================
+
+model Bank {
+  id        String   @id @default(dbgenerated("'bank_' || substr(gen_random_uuid()::text, 1, 13)"))
+  name      String
+  code      String   @unique
+  country   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bankAccounts         BankAccount[]
+  supplierBankAccounts SupplierBankAccount[]
+
+  @@map("banks")
+}
+
+model Currency {
+  code      String   @id
+  name      String
+  symbol    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bankAccounts         BankAccount[]
+  documents            Document[]
+  expenses             Expense[]
+  supplierBankAccounts SupplierBankAccount[]
+  sunatRhe             SunatRhe[]
+  sunatInvoices        SunatInvoice[]
+
+  @@map("currencies")
+}
+
+// ============================================================================
+// SUNAT INTEGRATION MODELS
+// ============================================================================
+
+model SunatRhe {
+  id                  String   @id @default(dbgenerated("'srhe_' || substr(gen_random_uuid()::text, 1, 13)"))
+  issueDate           DateTime
+  documentType        String   // Tipo Doc. Emitido
+  documentNumber      String   // Nro. Doc. Emitido
+  status              String   // Estado Doc. Emitido
+  issuerDocumentType  String   // Tipo de Doc. Emisor
+  issuerRuc           String   // Nro. Doc. Emisor
+  issuerName          String   // Razón Social del Emisor
+  rentType            String   // Tipo de Renta
+  isFree              Boolean  // Gratuito (sí/no)
+  description         String?  // Descripción
+  observation         String?  // Observación
+  currency            String   // Moneda de Operación
+  grossIncome         Decimal  @db.Decimal(15, 2) // Renta Bruta
+  incomeTax           Decimal  @db.Decimal(15, 2) // Impuesto a la Renta
+  netIncome           Decimal  @db.Decimal(15, 2) // Renta Neta
+  netPendingAmount    Decimal? @db.Decimal(15, 2) // Monto Neto Pendiente de Pago
+  sourceFile          String
+  companyId           String
+  userId              String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  currencyRef Currency @relation(fields: [currency], references: [code])
+  company     Company  @relation(fields: [companyId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("sunat_rhe")
+}
+
+
+model SunatInvoice {
+  id                     String   @id @default(dbgenerated("'sinv_' || substr(gen_random_uuid()::text, 1, 13)"))
+  period                 String   // Periodo
+  carSunat               String   // CAR SUNAT
+  ruc                    String   // RUC del emisor
+  name                   String   // Razón Social
+  issueDate              DateTime // Fecha de emisión
+  expirationDate         DateTime? // Fecha de vencimiento/pago
+  documentType           String   // Tipo CP/Doc.
+  series                 String   // Serie del CDP
+  year                   String?  // Año (si aplica)
+  documentNumber         String   // Nro CP o Doc.
+  identityDocumentType   String?  // Tipo Doc Identidad
+  identityDocumentNumber String?  // Nro Doc Identidad
+  customerName           String?  // Apellidos Nombres/ Razón Social del cliente
+  taxableBase            Decimal  @db.Decimal(15, 2) // BI Gravado DG
+  igv                    Decimal  @db.Decimal(15, 2) // IGV / IPM DG
+  taxableBaseNg          Decimal? @db.Decimal(15, 2) // BI Gravado DGNG
+  igvNg                  Decimal? @db.Decimal(15, 2) // IGV / IPM DGNG
+  taxableBaseDng         Decimal? @db.Decimal(15, 2) // BI Gravado DNG
+  igvDng                 Decimal? @db.Decimal(15, 2) // IGV / IPM DNG
+  valueNgAcquisition     Decimal? @db.Decimal(15, 2) // Valor Adq. NG
+  isc                    Decimal? @db.Decimal(15, 2) // ISC
+  icbper                 Decimal? @db.Decimal(15, 2) // ICBPER
+  otherCharges           Decimal? @db.Decimal(15, 2) // Otros Trib/Cargos
+  total                  Decimal  @db.Decimal(15, 2) // Total CP
+  currency               String   // Moneda
+  exchangeRate           Decimal? @db.Decimal(10, 4) // Tipo de Cambio
+  modifiedIssueDate      DateTime? // Fecha Emisión Doc Modificado
+  modifiedDocType        String?  // Tipo CP Modificado
+  modifiedDocSeries      String?  // Serie CP Modificado
+  modifiedDocNumber      String?  // Nro CP Modificado
+  damCode                String?  // COD. DAM o DSI
+  goodsServicesClass     String?  // Clasificación Bss y Sss
+  projectOperatorId      String?  // ID Proyecto Operadores
+  participationPercent   Decimal? @db.Decimal(5, 2) // Porcentaje de participación
+  imb                    String?  // IMB
+  carOrigin              String?  // CAR Orig / Ind E o I
+  detraction             String?  // Detracción
+  noteType               String?  // Tipo de Nota
+  invoiceStatus          String?  // Estado del comprobante
+  incal                  String?  // Incal (¿anulado?)
+  sourceFile             String
+  companyId              String
+  userId                 String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  // Relations
+  currencyRef Currency @relation(fields: [currency], references: [code])
+  company     Company  @relation(fields: [companyId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("sunat_invoices")
+}
+
+
+// ============================================================================
+// SYSTEM MODELS
+// ============================================================================
+
+model AuditLog {
+  id          String      @id @default(dbgenerated("'audl_' || substr(gen_random_uuid()::text, 1, 13)"))
+  userId      String
+  action      AuditAction
+  entity      String
+  entityId    String?
+  description String?
+  oldValues   Json?
+  newValues   Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime    @default(now())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
   
-  @@map("system_config")
+
+  @@map("audit_logs")
 }

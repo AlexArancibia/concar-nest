@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common"
 import { PrismaService } from "../prisma/prisma.service"
 import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
 import { BankAccount } from "@prisma/client"
+import { CreateBankAccountDto } from "./dto/create-bank-account.dto"
 
 @Injectable()
 export class BankAccountsService {
@@ -19,7 +20,7 @@ export class BankAccountsService {
             select: { id: true, name: true, ruc: true },
           },
         },
-        orderBy: { bankName: "asc" },
+        orderBy: { accountNumber: "asc" },
         skip,
         take: limit,
       }),
@@ -35,18 +36,46 @@ export class BankAccountsService {
     }
   }
 
-  async createBankAccount(bankAccount: any): Promise<BankAccount> {
+  async createBankAccount(createBankAccountDto: CreateBankAccountDto): Promise<BankAccount> {
+    const {
+      companyId,
+      bankId,
+      currency = "PEN",
+      initialBalance = 0,
+      currentBalance = 0,
+      ...rest
+    } = createBankAccountDto
+
     return this.prisma.bankAccount.create({
-      data: bankAccount,
+      data: {
+        ...rest,
+        initialBalance,
+        currentBalance,
+        company: {
+          connect: { id: companyId },
+        },
+        bank: {
+          connect: { id: bankId },
+        },
+        currencyRef: {
+          connect: { code: currency },
+        },
+      },
       include: {
         company: {
           select: { id: true, name: true, ruc: true },
+        },
+        bank: {
+          select: { id: true, name: true, code: true },
+        },
+        currencyRef: {
+          select: { code: true, name: true, symbol: true },
         },
       },
     })
   }
 
-  async updateBankAccount(id: string, updates: any): Promise<BankAccount> {
+  async updateBankAccount(id: string, updateBankAccountDto: any): Promise<BankAccount> {
     const existingBankAccount = await this.prisma.bankAccount.findUnique({
       where: { id },
     })
@@ -55,15 +84,36 @@ export class BankAccountsService {
       throw new NotFoundException(`Bank account with ID ${id} not found`)
     }
 
+    const { companyId, bankId, currency, ...rest } = updateBankAccountDto
+
+    const updateData: any = {
+      ...rest,
+      updatedAt: new Date(),
+    }
+
+    // Handle relations only if they are provided
+    if (companyId) {
+      updateData.company = { connect: { id: companyId } }
+    }
+    if (bankId) {
+      updateData.bank = { connect: { id: bankId } }
+    }
+    if (currency) {
+      updateData.currencyRef = { connect: { code: currency } }
+    }
+
     return this.prisma.bankAccount.update({
       where: { id },
-      data: {
-        ...updates,
-        updatedAt: new Date(),
-      },
+      data: updateData,
       include: {
         company: {
           select: { id: true, name: true, ruc: true },
+        },
+        bank: {
+          select: { id: true, name: true, code: true },
+        },
+        currencyRef: {
+          select: { code: true, name: true, symbol: true },
         },
       },
     })
@@ -107,7 +157,7 @@ export class BankAccountsService {
   async getBankAccountsByCompany(companyId: string): Promise<BankAccount[]> {
     return this.prisma.bankAccount.findMany({
       where: { companyId, isActive: true },
-      orderBy: { bankName: "asc" },
+      orderBy: { accountNumber: "asc" },
     })
   }
 }

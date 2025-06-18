@@ -1,17 +1,18 @@
 import { IsEmail, IsString, MinLength, IsOptional, IsEnum } from "class-validator"
 
 export enum UserRole {
-  SUPERADMIN = "SUPERADMIN",
   ADMIN = "ADMIN",
   MANAGER = "MANAGER",
   EDITOR = "EDITOR",
-  VIEWER = "VIEWER",
+  ACCOUNTANT = "ACCOUNTANT",
+  VIEWER = "VIEWER"
 }
-
+ 
 export enum AuthProvider {
   EMAIL = "EMAIL",
   GOOGLE = "GOOGLE",
   MICROSOFT = "MICROSOFT",
+  GITHUB = "GITHUB"
 }
 
 export class CreateAuthDto {

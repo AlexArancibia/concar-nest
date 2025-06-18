@@ -12,6 +12,7 @@ import  { UpdateUserDto } from "./dto/update-auth.dto"
 import  { LoginAuthDto } from "./dto/login-auth.dto"
 import * as bcrypt from "bcryptjs"
 import  { ConfigService } from "@nestjs/config"
+import { AuthProvider, UserRole } from "@prisma/client"
 
 @Injectable()
 export class AuthService {
@@ -45,11 +46,11 @@ export class AuthService {
           password: hashedPassword,
           firstName: createUserDto.firstName,
           lastName: createUserDto.lastName,
-          role: createUserDto.role || "VIEWER",
+          role: createUserDto.role || UserRole.ACCOUNTANT,
           phone: createUserDto.phone,
           image: createUserDto.image,
           bio: createUserDto.bio,
-          authProvider: createUserDto.authProvider || "EMAIL",
+          authProvider: createUserDto.authProvider || AuthProvider.EMAIL,
           companyId: createUserDto.companyId,
           isActive: true,
           createdAt: new Date(),

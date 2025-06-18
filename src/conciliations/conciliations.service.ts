@@ -1,72 +1,81 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from "@nestjs/common"
-import  { PrismaService } from "../prisma/prisma.service"
-import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import {
-   Conciliation,
-   ConciliationItem,
-  ConciliationStatus,
-  ConciliationItemStatus,
-  ConciliationItemType,
-} from "@prisma/client"
-import  { CreateConciliationDto } from "./dto/create-conciliation.dto"
-import  { UpdateConciliationDto } from "./dto/update-conciliation.dto"
-import  { CreateConciliationItemDto } from "./dto/create-conciliation-item.dto"
-import  { UpdateConciliationItemDto } from "./dto/update-conciliation-item.dto"
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common"
+import { PrismaService } from "../prisma/prisma.service"
+import { CreateConciliationDto } from "./dto/create-conciliation.dto"
+import { UpdateConciliationDto } from "./dto/update-conciliation.dto"
+import { CreateConciliationItemDto } from "./dto/create-conciliation-item.dto"
+import { UpdateConciliationItemDto } from "./dto/update-conciliation-item.dto"
+import { CreateConciliationExpenseDto } from "./dto/create-conciliation-expense.dto"
+import { UpdateConciliationExpenseDto } from "./dto/update-conciliation-expense.dto"
+import { PaginationDto } from "../common/dto/pagination.dto"
+import { ConciliationFiltersDto } from "./dto/conciliation-filters.dto"
+import { ConciliationStatus, ConciliationItemStatus } from "@prisma/client"
 
 @Injectable()
 export class ConciliationsService {
   constructor(private prisma: PrismaService) {}
 
-  async fetchConciliations(companyId: string, pagination?: PaginationDto): Promise<PaginatedResponse<Conciliation>> {
-    const { page = 1, limit = 10 } = pagination || {}
+  // Conciliation CRUD operations
+  async fetchConciliations(companyId: string, pagination: PaginationDto) {
+    const { page = 1, limit = 10 } = pagination
     const skip = (page - 1) * limit
+
+    const where = {
+      companyId,
+    }
 
     const [conciliations, total] = await Promise.all([
       this.prisma.conciliation.findMany({
-        where: { companyId },
+        where,
+        skip,
+        take: limit,
         include: {
-          company: {
-            select: { id: true, name: true, ruc: true },
-          },
-          bankAccount: true,
-          transaction: true, // Incluir la transacción única
-          createdBy: {
-            select: { id: true, firstName: true, lastName: true, email: true },
-          },
-          items: {
-            take: 5,
-            include: {
-              document: {
+          bankAccount: {
+            select: {
+              id: true,
+              accountNumber: true,
+              alias: true,
+              bank: {
                 select: {
-                  id: true,
-                  fullNumber: true,
-                  supplierId: true,
-                  issueDate: true,
-                  dueDate: true,
-                  currency: true,
-                  total: true,
-                  pendingAmount: true,
-                  conciliatedAmount: true,
-                  description: true,
-                  status: true,
-                  supplier: {
-                    select: {
-                      id: true,
-                      businessName: true,
-                      documentNumber: true,
-                      documentType: true,
-                    },
-                  },
+                  name: true,
+                  code: true,
                 },
               },
             },
           },
+          transaction: {
+            select: {
+              id: true,
+              description: true,
+              amount: true,
+              transactionDate: true,
+            },
+          },
+          createdBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          approvedBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          _count: {
+            select: {
+              items: true,
+              expenses: true,
+            },
+          },
         },
         orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
       }),
-      this.prisma.conciliation.count({ where: { companyId } }),
+      this.prisma.conciliation.count({ where }),
     ])
 
     return {
@@ -78,666 +87,895 @@ export class ConciliationsService {
     }
   }
 
-  async createConciliation(conciliationDto: CreateConciliationDto): Promise<Conciliation> {
-    // Verificar que la transacción existe
-    const transaction = await this.prisma.transaction.findUnique({
-      where: { id: conciliationDto.transactionId },
+  async createConciliation(createConciliationDto: CreateConciliationDto) {
+    const { expenses, ...conciliationData } = createConciliationDto
+
+    // Verify bank account exists and belongs to company
+    const bankAccount = await this.prisma.bankAccount.findFirst({
+      where: {
+        id: conciliationData.bankAccountId,
+        companyId: conciliationData.companyId,
+      },
     })
 
-    if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${conciliationDto.transactionId} not found`)
+    if (!bankAccount) {
+      throw new NotFoundException("Bank account not found or doesn't belong to company")
     }
 
-    // Verificar que la transacción no esté ya conciliada
-    const existingConciliation = await this.prisma.conciliation.findUnique({
-      where: { transactionId: conciliationDto.transactionId },
-    })
+    // Verify transaction exists if provided
+    if (conciliationData.transactionId) {
+      const transaction = await this.prisma.transaction.findFirst({
+        where: {
+          id: conciliationData.transactionId,
+          companyId: conciliationData.companyId,
+        },
+      })
 
-    if (existingConciliation) {
-      throw new ConflictException(
-        `Transaction with ID ${conciliationDto.transactionId} is already associated with another conciliation`,
-      )
+      if (!transaction) {
+        throw new NotFoundException("Transaction not found or doesn't belong to company")
+      }
     }
 
     return this.prisma.conciliation.create({
       data: {
-        companyId: conciliationDto.companyId,
-        bankAccountId: conciliationDto.bankAccountId,
-        transactionId: conciliationDto.transactionId, // Nueva relación directa
-        periodStart: new Date(conciliationDto.periodStart),
-        periodEnd: new Date(conciliationDto.periodEnd),
-        totalDocuments: conciliationDto.totalDocuments || 0,
-        conciliatedItems: conciliationDto.conciliatedItems || 0,
-        pendingItems: conciliationDto.pendingItems || 0,
-        bankBalance: conciliationDto.bankBalance,
-        bookBalance: conciliationDto.bookBalance,
-        difference: conciliationDto.difference,
-        toleranceAmount: conciliationDto.toleranceAmount || 0,
-        status: conciliationDto.status || ConciliationStatus.PENDING,
-        createdById: conciliationDto.createdById,
+        ...conciliationData,
+        periodStart: new Date(conciliationData.periodStart),
+        periodEnd: new Date(conciliationData.periodEnd),
+        paymentDate: conciliationData.paymentDate ? new Date(conciliationData.paymentDate) : null,
+        expenses: expenses
+          ? {
+              create: expenses.map((expense) => ({
+                ...expense,
+                expenseDate: new Date(expense.expenseDate),
+              })),
+            }
+          : undefined,
       },
       include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
-        bankAccount: true,
-        transaction: true, // Incluir la transacción
-        createdBy: {
-          select: { id: true, firstName: true, lastName: true, email: true },
-        },
-      },
-    })
-  }
-
-  async updateConciliation(id: string, updates: UpdateConciliationDto): Promise<Conciliation> {
-    const existingConciliation = await this.prisma.conciliation.findUnique({
-      where: { id },
-    })
-
-    if (!existingConciliation) {
-      throw new NotFoundException(`Conciliation with ID ${id} not found`)
-    }
-
-    const updateData: any = { ...updates }
-
-    // Convertir strings a Date cuando sea necesario
-    if (updateData.periodStart && typeof updateData.periodStart === "string") {
-      updateData.periodStart = new Date(updateData.periodStart)
-    }
-    if (updateData.periodEnd && typeof updateData.periodEnd === "string") {
-      updateData.periodEnd = new Date(updateData.periodEnd)
-    }
-    if (updateData.completedAt && typeof updateData.completedAt === "string") {
-      updateData.completedAt = new Date(updateData.completedAt)
-    }
-
-    return this.prisma.conciliation.update({
-      where: { id },
-      data: {
-        ...updateData,
-        updatedAt: new Date(),
-      },
-      include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
-        bankAccount: true,
-        transaction: true,
-        createdBy: {
-          select: { id: true, firstName: true, lastName: true, email: true },
-        },
-      },
-    })
-  }
-
-  async deleteConciliation(id: string): Promise<void> {
-    const conciliation = await this.prisma.conciliation.findUnique({
-      where: { id },
-      include: {
-        items: {
+        bankAccount: {
           include: {
-            document: true,
+            bank: true,
           },
         },
         transaction: true,
-      },
-    })
-
-    if (!conciliation) {
-      throw new NotFoundException(`Conciliation with ID ${id} not found`)
-    }
-
-    // Usar transacción para garantizar la integridad
-    await this.prisma.$transaction(async (prisma) => {
-      // 1. Revertir el estado de los documentos asociados
-      for (const item of conciliation.items) {
-        if (item.documentId && item.document) {
-          const document = item.document
-          const newConciliatedAmount = Math.max(0, Number(document.conciliatedAmount) - Number(item.conciliatedAmount))
-          const newPendingAmount = Number(document.total) - newConciliatedAmount
-          const newStatus =
-            newConciliatedAmount <= 0 ? "PENDING" : newPendingAmount <= 0.01 ? "CONCILIATED" : "PARTIALLY_CONCILIATED"
-
-          await prisma.document.update({
-            where: { id: item.documentId },
-            data: {
-              conciliatedAmount: newConciliatedAmount,
-              pendingAmount: newPendingAmount,
-              status: newStatus,
-            },
-          })
-        }
-      }
-
-      // 2. Revertir el estado de la transacción asociada
-      if (conciliation.transactionId && conciliation.transaction) {
-        await prisma.transaction.update({
-          where: { id: conciliation.transactionId },
-          data: {
-            status: "PENDING",
-            conciliatedAmount: 0,
-            pendingAmount: Math.abs(Number(conciliation.transaction.amount)),
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
           },
-        })
-      }
-
-      // 3. Eliminar todos los items de conciliación
-      await prisma.conciliationItem.deleteMany({
-        where: { conciliationId: id },
-      })
-
-      // 4. Finalmente eliminar la conciliación
-      await prisma.conciliation.delete({
-        where: { id },
-      })
+        },
+        expenses: true,
+      },
     })
   }
 
-  async getConciliationById(id: string): Promise<Conciliation | undefined> {
+  async getConciliationById(id: string) {
     const conciliation = await this.prisma.conciliation.findUnique({
       where: { id },
       include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
-        bankAccount: true,
-        transaction: {
-          // Incluir la transacción única
+        bankAccount: {
           include: {
-            supplier: true,
+            bank: true,
           },
         },
-        createdBy: {
-          select: { id: true, firstName: true, lastName: true, email: true },
-        },
+        transaction: true,
         items: {
           include: {
             document: {
               select: {
                 id: true,
                 fullNumber: true,
-                supplierId: true,
+                documentType: true,
                 issueDate: true,
-                dueDate: true,
-                currency: true,
                 total: true,
-                pendingAmount: true,
-                conciliatedAmount: true,
-                description: true,
-                status: true,
                 supplier: {
                   select: {
-                    id: true,
                     businessName: true,
                     documentNumber: true,
-                    documentType: true,
                   },
                 },
               },
             },
           },
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: "asc" },
+        },
+        expenses: {
+          include: {
+            account: {
+              select: {
+                accountCode: true,
+                accountName: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
         },
       },
     })
 
-    return conciliation || undefined
+    if (!conciliation) {
+      throw new NotFoundException("Conciliation not found")
+    }
+
+    return conciliation
   }
 
-  // ConciliationItem methods
-  async createConciliationItem(item: CreateConciliationItemDto): Promise<ConciliationItem> {
-    // Verificar que la conciliación existe
+  async updateConciliation(id: string, updateConciliationDto: UpdateConciliationDto) {
+    const existingConciliation = await this.prisma.conciliation.findUnique({
+      where: { id },
+    })
+
+    if (!existingConciliation) {
+      throw new NotFoundException("Conciliation not found")
+    }
+
+    // Prepare update data excluding problematic fields
+    const updateData: any = {}
+
+    const allowedFields = [
+      "reference",
+      "periodStart",
+      "periodEnd",
+      "totalDocuments",
+      "conciliatedItems",
+      "pendingItems",
+      "bankBalance",
+      "bookBalance",
+      "difference",
+      "toleranceAmount",
+      "status",
+      "additionalExpensesTotal",
+      "totalAmount",
+      "paymentDate",
+      "paymentAmount",
+      "notes",
+      "approvedById",
+      "completedAt",
+    ]
+
+    allowedFields.forEach((field) => {
+      if (updateConciliationDto[field] !== undefined) {
+        if (field === "periodStart" || field === "periodEnd" || field === "paymentDate" || field === "completedAt") {
+          updateData[field] = updateConciliationDto[field] ? new Date(updateConciliationDto[field]) : null
+        } else {
+          updateData[field] = updateConciliationDto[field]
+        }
+      }
+    })
+
+    updateData.updatedAt = new Date()
+
+    return this.prisma.conciliation.update({
+      where: { id },
+      data: updateData,
+      include: {
+        bankAccount: {
+          include: {
+            bank: true,
+          },
+        },
+        transaction: true,
+        items: true,
+        expenses: true,
+      },
+    })
+  }
+
+  async deleteConciliation(id: string) {
     const conciliation = await this.prisma.conciliation.findUnique({
-      where: { id: item.conciliationId },
+      where: { id },
     })
 
     if (!conciliation) {
-      throw new NotFoundException(`Conciliation with ID ${item.conciliationId} not found`)
+      throw new NotFoundException("Conciliation not found")
     }
 
-    // Verificar que el documento existe
-    const document = await this.prisma.document.findUnique({
-      where: { id: item.documentId },
-    })
-
-    if (!document) {
-      throw new NotFoundException(`Document with ID ${item.documentId} not found`)
+    if (conciliation.status === ConciliationStatus.COMPLETED) {
+      throw new BadRequestException("Cannot delete completed conciliation")
     }
 
-    const conciliationItem = await this.prisma.conciliationItem.create({
-      data: {
-        conciliationId: item.conciliationId,
-        itemType: item.itemType,
-        documentId: item.documentId, // Solo documento, la transacción está en la conciliación
-        documentAmount: item.documentAmount,
-        conciliatedAmount: item.conciliatedAmount,
-        difference: item.difference || 0,
-        distributionPercentage: item.distributionPercentage || null,
-        detractionAmount: item.detractionAmount || null,
-        retentionAmount: item.retentionAmount || null,
-        status: item.status || ConciliationItemStatus.PENDING,
-        notes: item.notes || null,
-        systemNotes: item.systemNotes || null,
-        conciliatedBy: item.conciliatedBy,
-      },
-      include: {
-        document: {
-          select: {
-            id: true,
-            fullNumber: true,
-            supplierId: true,
-            issueDate: true,
-            dueDate: true,
-            currency: true,
-            total: true,
-            pendingAmount: true,
-            conciliatedAmount: true,
-            description: true,
-            status: true,
-            supplier: {
-              select: {
-                id: true,
-                businessName: true,
-                documentNumber: true,
-                documentType: true,
-              },
-            },
-          },
-        },
-      },
-    })
-
-    // Actualizar contadores de la conciliación
-    await this.updateConciliationCounters(item.conciliationId)
-
-    return conciliationItem
-  }
-
-  async updateConciliationItem(id: string, updates: UpdateConciliationItemDto): Promise<ConciliationItem> {
-    const existingItem = await this.prisma.conciliationItem.findUnique({
+    await this.prisma.conciliation.delete({
       where: { id },
     })
-
-    if (!existingItem) {
-      throw new NotFoundException(`Conciliation item with ID ${id} not found`)
-    }
-
-    const updateData: any = { ...updates }
-
-    // Convertir string a Date cuando sea necesario
-    if (updateData.conciliatedAt && typeof updateData.conciliatedAt === "string") {
-      updateData.conciliatedAt = new Date(updateData.conciliatedAt)
-    }
-
-    const updatedItem = await this.prisma.conciliationItem.update({
-      where: { id },
-      data: {
-        ...updateData,
-        updatedAt: new Date(),
-      },
-      include: {
-        document: {
-          select: {
-            id: true,
-            fullNumber: true,
-            supplierId: true,
-            issueDate: true,
-            dueDate: true,
-            currency: true,
-            total: true,
-            pendingAmount: true,
-            conciliatedAmount: true,
-            description: true,
-            status: true,
-            supplier: {
-              select: {
-                id: true,
-                businessName: true,
-                documentNumber: true,
-                documentType: true,
-              },
-            },
-          },
-        },
-      },
-    })
-
-    // Actualizar contadores de la conciliación
-    await this.updateConciliationCounters(existingItem.conciliationId)
-
-    return updatedItem
   }
 
-  async deleteConciliationItem(id: string): Promise<void> {
-    const item = await this.prisma.conciliationItem.findUnique({
-      where: { id },
-    })
-
-    if (!item) {
-      throw new NotFoundException(`Conciliation item with ID ${id} not found`)
-    }
-
-    const conciliationId = item.conciliationId
-
-    await this.prisma.conciliationItem.delete({
-      where: { id },
-    })
-
-    // Actualizar contadores de la conciliación
-    await this.updateConciliationCounters(conciliationId)
-  }
-
-  async getConciliationItemById(id: string): Promise<ConciliationItem | undefined> {
-    const item = await this.prisma.conciliationItem.findUnique({
-      where: { id },
-      include: {
-        document: {
-          select: {
-            id: true,
-            fullNumber: true,
-            supplierId: true,
-            issueDate: true,
-            dueDate: true,
-            currency: true,
-            total: true,
-            pendingAmount: true,
-            conciliatedAmount: true,
-            description: true,
-            status: true,
-            supplier: {
-              select: {
-                id: true,
-                businessName: true,
-                documentNumber: true,
-                documentType: true,
-              },
-            },
-          },
-        },
-      },
-    })
-
-    return item || undefined
-  }
-
-  async getConciliationItemsByConciliation(conciliationId: string): Promise<ConciliationItem[]> {
-    return this.prisma.conciliationItem.findMany({
-      where: { conciliationId },
-      include: {
-        document: {
-          select: {
-            id: true,
-            fullNumber: true,
-            supplierId: true,
-            issueDate: true,
-            dueDate: true,
-            currency: true,
-            total: true,
-            pendingAmount: true,
-            conciliatedAmount: true,
-            description: true,
-            status: true,
-            supplier: {
-              select: {
-                id: true,
-                businessName: true,
-                documentNumber: true,
-                documentType: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    })
-  }
-
-  // Método privado para actualizar contadores
-  private async updateConciliationCounters(conciliationId: string): Promise<void> {
-    const items = await this.prisma.conciliationItem.findMany({
-      where: { conciliationId },
-    })
-
-    const totalDocuments = items.length
-    const conciliatedItems = items.filter(
-      (item) => item.status === ConciliationItemStatus.MATCHED || item.status === ConciliationItemStatus.PARTIAL_MATCH,
-    ).length
-    const pendingItems = totalDocuments - conciliatedItems
-
-    await this.prisma.conciliation.update({
-      where: { id: conciliationId },
-      data: {
-        totalDocuments,
-        conciliatedItems,
-        pendingItems,
-      },
-    })
-  }
-
-  // Método para completar conciliación
-  async completeConciliation(id: string): Promise<Conciliation> {
+  // Conciliation completion and automation
+  async completeConciliation(id: string) {
     const conciliation = await this.getConciliationById(id)
-    if (!conciliation) {
-      throw new NotFoundException(`Conciliation with ID ${id} not found`)
+
+    if (conciliation.status === ConciliationStatus.COMPLETED) {
+      throw new BadRequestException("Conciliation is already completed")
     }
 
-    // Verificar si todos los items están conciliados
-    const items = await this.prisma.conciliationItem.findMany({
-      where: { conciliationId: id },
-    })
-
-    const allConciliated = items.every(
-      (item) => item.status === ConciliationItemStatus.MATCHED || item.status === ConciliationItemStatus.PARTIAL_MATCH,
+    // Validate that all items are properly conciliated
+    const pendingItems = conciliation.items.filter(
+      (item) => item.status === ConciliationItemStatus.PENDING || item.status === ConciliationItemStatus.PARTIAL,
     )
 
-    if (!allConciliated) {
-      throw new BadRequestException("Cannot complete conciliation because there are pending items")
+    if (pendingItems.length > 0) {
+      throw new BadRequestException(`Cannot complete conciliation with ${pendingItems.length} pending items`)
     }
 
-    // Actualizar la transacción como conciliada
-    if (conciliation.transactionId) {
-      await this.prisma.transaction.update({
-        where: { id: conciliation.transactionId },
-        data: {
-          status: "CONCILIATED",
-          conciliatedAmount: items.reduce((sum, item) => sum + Number(item.conciliatedAmount), 0),
-          pendingAmount: 0,
-        },
-      })
-    }
+    // Calculate totals
+    const totalConciliatedAmount = conciliation.items.reduce((sum, item) => sum + Number(item.conciliatedAmount), 0)
+    const totalExpenses = conciliation.expenses.reduce((sum, expense) => sum + Number(expense.amount), 0)
 
-    // Actualizar los documentos
-    for (const item of items) {
-      const document = await this.prisma.document.findUnique({
-        where: { id: item.documentId },
-      })
-
-      if (document) {
-        const newConciliatedAmount = Number(document.conciliatedAmount || 0) + Number(item.conciliatedAmount)
-        const newPendingAmount = Math.max(0, Number(document.total) - newConciliatedAmount)
-        const newStatus = newPendingAmount <= 0.01 ? "CONCILIATED" : "PARTIALLY_CONCILIATED"
-
-        await this.prisma.document.update({
-          where: { id: document.id },
-          data: {
-            conciliatedAmount: newConciliatedAmount,
-            pendingAmount: newPendingAmount,
-            status: newStatus,
-          },
-        })
-      }
-    }
-
-    // Completar la conciliación
-    return this.updateConciliation(id, {
-      status: ConciliationStatus.COMPLETED,
-      completedAt: new Date().toISOString(),
+    return this.prisma.conciliation.update({
+      where: { id },
+      data: {
+        status: ConciliationStatus.COMPLETED,
+        completedAt: new Date(),
+        totalAmount: totalConciliatedAmount,
+        additionalExpensesTotal: totalExpenses,
+        conciliatedItems: conciliation.items.length,
+        pendingItems: 0,
+      },
+      include: {
+        bankAccount: true,
+        transaction: true,
+        items: true,
+        expenses: true,
+      },
     })
   }
 
-  // Método mejorado para conciliación automática
-  async performAutomaticConciliation(conciliationId: string): Promise<{
-    matched: number
-    partialMatches: number
-    unmatched: number
-  }> {
-    const conciliation = await this.getConciliationById(conciliationId)
-    if (!conciliation) {
-      throw new NotFoundException(`Conciliation with ID ${conciliationId} not found`)
+  async performAutomaticConciliation(id: string) {
+    const conciliation = await this.getConciliationById(id)
+
+    if (conciliation.status === ConciliationStatus.COMPLETED) {
+      throw new BadRequestException("Cannot perform automatic conciliation on completed conciliation")
     }
 
-    // Obtener documentos disponibles para el período
-    const documents = await this.prisma.document.findMany({
+    // Get pending documents in the date range
+    const pendingDocuments = await this.prisma.document.findMany({
       where: {
         companyId: conciliation.companyId,
         issueDate: {
           gte: conciliation.periodStart,
           lte: conciliation.periodEnd,
         },
-        status: {
-          in: ["VALIDATED", "PENDING"],
-        },
-        pendingAmount: {
-          gt: 0,
+        status: "PENDING",
+        conciliationItems: {
+          none: {},
         },
       },
-      select: {
-        id: true,
-        fullNumber: true,
-        supplierId: true,
-        issueDate: true,
-        dueDate: true,
-        currency: true,
-        total: true,
-        pendingAmount: true,
-        conciliatedAmount: true,
-        description: true,
-        status: true,
+      include: {
+        supplier: true,
       },
     })
 
-    let matched = 0
-    let partialMatches = 0
-    let unmatched = 0
+    // Simple automatic matching logic
+    const tolerance = Number(conciliation.toleranceAmount) || 30
+    const transactionAmount = conciliation.transaction ? Number(conciliation.transaction.amount) : 0
+    const matchedDocuments = []
 
-    // Fetch the transaction separately
-    const transaction = await this.prisma.transaction.findUnique({
-      where: { id: conciliation.transactionId },
-      include: { supplier: true },
-    })
+    if (transactionAmount > 0) {
+      // Try to find exact matches first
+      const exactMatch = pendingDocuments.find((doc) => Math.abs(Number(doc.total) - transactionAmount) <= tolerance)
 
-    if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${conciliation.transactionId} not found`)
-    }
-
-    const transactionAmount = Math.abs(Number(transaction.amount || 0))
-    const tolerance = Number(conciliation.toleranceAmount) || 0.01
-
-    // Algoritmo de coincidencia simple - puede mejorarse
-    for (const document of documents) {
-      const documentAmount = Number(document.pendingAmount || document.total)
-      const amountDifference = Math.abs(documentAmount - transactionAmount)
-
-      if (amountDifference <= tolerance) {
-        // Coincidencia exacta
-        await this.createConciliationItem({
-          conciliationId,
-          itemType: ConciliationItemType.DOCUMENT_TRANSACTION,
-          documentId: document.id,
-          documentAmount,
-          conciliatedAmount: Math.min(transactionAmount, documentAmount),
-          difference: amountDifference,
-          status: ConciliationItemStatus.MATCHED,
-          systemNotes: "Automatically matched by amount",
-          conciliatedBy: conciliation.createdById,
-          notes: null,
+      if (exactMatch) {
+        matchedDocuments.push({
+          document: exactMatch,
+          conciliatedAmount: Number(exactMatch.total),
+          difference: transactionAmount - Number(exactMatch.total),
         })
-        matched++
-      } else if (document.supplierId === transaction.supplierId) {
-        // Coincidencia por proveedor pero diferente monto
-        await this.createConciliationItem({
-          conciliationId,
-          itemType: ConciliationItemType.DOCUMENT_TRANSACTION,
-          documentId: document.id,
-          documentAmount,
-          conciliatedAmount: Math.min(transactionAmount, documentAmount),
-          difference: amountDifference,
-          status: ConciliationItemStatus.PARTIAL_MATCH,
-          systemNotes: "Matched by supplier but different amount",
-          conciliatedBy: conciliation.createdById,
-          notes: null,
-        })
-        partialMatches++
       } else {
-        unmatched++
+        // Try to find combination of documents that match
+        const combinations = this.findDocumentCombinations(pendingDocuments, transactionAmount, tolerance)
+        if (combinations.length > 0) {
+          matchedDocuments.push(...combinations[0])
+        }
       }
     }
 
-    // Actualizar estadísticas de conciliación
-    await this.updateConciliation(conciliationId, {
-      totalDocuments: documents.length,
-      conciliatedItems: matched,
-      pendingItems: partialMatches + unmatched,
-      status: matched > 0 ? ConciliationStatus.IN_PROGRESS : ConciliationStatus.PENDING,
+    // Create conciliation items for matched documents
+    const createdItems = []
+    for (const match of matchedDocuments) {
+      const item = await this.createConciliationItem({
+        conciliationId: id,
+        itemType: "DOCUMENT",
+        documentId: match.document.id,
+        documentAmount: Number(match.document.total),
+        conciliatedAmount: match.conciliatedAmount,
+        difference: match.difference,
+        status:
+          Math.abs(match.difference) <= tolerance ? ConciliationItemStatus.MATCHED : ConciliationItemStatus.PARTIAL,
+        systemNotes: "Automatically matched by system",
+      })
+      createdItems.push(item)
+    }
+
+    // Update conciliation status
+    await this.prisma.conciliation.update({
+      where: { id },
+      data: {
+        status: createdItems.length > 0 ? ConciliationStatus.IN_PROGRESS : ConciliationStatus.PENDING,
+        conciliatedItems: createdItems.length,
+        pendingItems: Math.max(0, conciliation.totalDocuments - createdItems.length),
+      },
     })
 
-    return { matched, partialMatches, unmatched }
+    return {
+      matchedDocuments: createdItems.length,
+      totalAmount: matchedDocuments.reduce((sum, match) => sum + match.conciliatedAmount, 0),
+      items: createdItems,
+    }
   }
 
-  // Método para validar conciliación
-  async validateConciliation(
-    transactionId: string,
-    documentIds: string[],
-    tolerance = 30,
-  ): Promise<{
-    isValid: boolean
-    transactionAmount: number
-    totalDocuments: number
-    difference: number
-    withinTolerance: boolean
-    errors: string[]
-  }> {
-    const errors: string[] = []
-
-    const [transaction, documents] = await Promise.all([
-      this.prisma.transaction.findUnique({
-        where: { id: transactionId },
-      }),
-      this.prisma.document.findMany({
-        where: { id: { in: documentIds } },
-        select: {
-          id: true,
-          fullNumber: true,
-          total: true,
-          pendingAmount: true,
-        },
-      }),
-    ])
+  async validateConciliation(transactionId: string, documentIds: string[], tolerance = 30) {
+    // Get transaction
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    })
 
     if (!transaction) {
-      errors.push("Transaction not found")
+      throw new NotFoundException("Transaction not found")
     }
+
+    // Get documents
+    const documents = await this.prisma.document.findMany({
+      where: {
+        id: { in: documentIds },
+        companyId: transaction.companyId,
+      },
+      include: {
+        supplier: {
+          select: {
+            businessName: true,
+            documentNumber: true,
+          },
+        },
+      },
+    })
 
     if (documents.length !== documentIds.length) {
-      errors.push("Some documents not found")
+      throw new BadRequestException("Some documents were not found or don't belong to the same company")
     }
 
-    const transactionAmount = transaction ? Math.abs(Number(transaction.amount)) : 0
-    const totalDocuments = documents.reduce((sum, d) => sum + Number(d.pendingAmount || d.total), 0)
-    const difference = Math.abs(transactionAmount - totalDocuments)
-    const withinTolerance = difference <= tolerance
-
-    if (!withinTolerance) {
-      errors.push(`Difference ${difference.toFixed(2)} exceeds tolerance ${tolerance}`)
-    }
+    // Calculate totals
+    const transactionAmount = Number(transaction.amount)
+    const documentsTotal = documents.reduce((sum, doc) => sum + Number(doc.total), 0)
+    const difference = transactionAmount - documentsTotal
+    const isWithinTolerance = Math.abs(difference) <= tolerance
 
     return {
-      isValid: errors.length === 0 && !!transaction && documents.length > 0,
-      transactionAmount,
-      totalDocuments,
-      difference,
-      withinTolerance,
-      errors,
+      transaction: {
+        id: transaction.id,
+        amount: transactionAmount,
+        description: transaction.description,
+        date: transaction.transactionDate,
+      },
+      documents: documents.map((doc) => ({
+        id: doc.id,
+        fullNumber: doc.fullNumber,
+        amount: Number(doc.total),
+        supplier: doc.supplier?.businessName,
+        issueDate: doc.issueDate,
+      })),
+      summary: {
+        transactionAmount,
+        documentsTotal,
+        difference,
+        tolerance,
+        isWithinTolerance,
+        canConciliate: isWithinTolerance,
+      },
     }
+  }
+
+  // ConciliationItem CRUD operations
+  async createConciliationItem(createConciliationItemDto: CreateConciliationItemDto) {
+    // Verify conciliation exists
+    const conciliation = await this.prisma.conciliation.findUnique({
+      where: { id: createConciliationItemDto.conciliationId },
+    })
+
+    if (!conciliation) {
+      throw new NotFoundException("Conciliation not found")
+    }
+
+    // Verify document exists if provided
+    if (createConciliationItemDto.documentId) {
+      const document = await this.prisma.document.findFirst({
+        where: {
+          id: createConciliationItemDto.documentId,
+          companyId: conciliation.companyId,
+        },
+      })
+
+      if (!document) {
+        throw new NotFoundException("Document not found or doesn't belong to the same company")
+      }
+    }
+
+    return this.prisma.conciliationItem.create({
+      data: createConciliationItemDto,
+      include: {
+        document: {
+          select: {
+            id: true,
+            fullNumber: true,
+            documentType: true,
+            total: true,
+            supplier: {
+              select: {
+                businessName: true,
+              },
+            },
+          },
+        },
+        conciliation: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+          },
+        },
+      },
+    })
+  }
+
+  async getConciliationItemById(id: string) {
+    const item = await this.prisma.conciliationItem.findUnique({
+      where: { id },
+      include: {
+        document: {
+          include: {
+            supplier: true,
+          },
+        },
+        conciliation: {
+          include: {
+            bankAccount: true,
+            transaction: true,
+          },
+        },
+      },
+    })
+
+    if (!item) {
+      throw new NotFoundException("Conciliation item not found")
+    }
+
+    return item
+  }
+
+  async updateConciliationItem(id: string, updateConciliationItemDto: UpdateConciliationItemDto) {
+    const existingItem = await this.prisma.conciliationItem.findUnique({
+      where: { id },
+    })
+
+    if (!existingItem) {
+      throw new NotFoundException("Conciliation item not found")
+    }
+
+    return this.prisma.conciliationItem.update({
+      where: { id },
+      data: {
+        ...updateConciliationItemDto,
+        updatedAt: new Date(),
+      },
+      include: {
+        document: true,
+        conciliation: true,
+      },
+    })
+  }
+
+  async deleteConciliationItem(id: string) {
+    const item = await this.prisma.conciliationItem.findUnique({
+      where: { id },
+      include: {
+        conciliation: true,
+      },
+    })
+
+    if (!item) {
+      throw new NotFoundException("Conciliation item not found")
+    }
+
+    if (item.conciliation.status === ConciliationStatus.COMPLETED) {
+      throw new BadRequestException("Cannot delete item from completed conciliation")
+    }
+
+    await this.prisma.conciliationItem.delete({
+      where: { id },
+    })
+  }
+
+  async getConciliationItemsByConciliation(conciliationId: string) {
+    return this.prisma.conciliationItem.findMany({
+      where: { conciliationId },
+      include: {
+        document: {
+          include: {
+            supplier: {
+              select: {
+                businessName: true,
+                documentNumber: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    })
+  }
+
+  // ConciliationExpense CRUD operations
+  async createConciliationExpense(createExpenseDto: CreateConciliationExpenseDto) {
+    // Verify conciliation exists
+    const conciliation = await this.prisma.conciliation.findUnique({
+      where: { id: createExpenseDto.conciliationId },
+    })
+
+    if (!conciliation) {
+      throw new NotFoundException("Conciliation not found")
+    }
+
+    return this.prisma.conciliationExpense.create({
+      data: {
+        ...createExpenseDto,
+        expenseDate: new Date(createExpenseDto.expenseDate),
+      },
+      include: {
+        conciliation: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+          },
+        },
+        account: {
+          select: {
+            accountCode: true,
+            accountName: true,
+          },
+        },
+      },
+    })
+  }
+
+  async getConciliationExpenseById(id: string) {
+    const expense = await this.prisma.conciliationExpense.findUnique({
+      where: { id },
+      include: {
+        conciliation: true,
+        account: true,
+      },
+    })
+
+    if (!expense) {
+      throw new NotFoundException("Conciliation expense not found")
+    }
+
+    return expense
+  }
+
+  async updateConciliationExpense(id: string, updateExpenseDto: UpdateConciliationExpenseDto) {
+    const existingExpense = await this.prisma.conciliationExpense.findUnique({
+      where: { id },
+    })
+
+    if (!existingExpense) {
+      throw new NotFoundException("Conciliation expense not found")
+    }
+
+    const updateData: any = { ...updateExpenseDto }
+    if (updateExpenseDto.expenseDate) {
+      updateData.expenseDate = new Date(updateExpenseDto.expenseDate)
+    }
+
+    return this.prisma.conciliationExpense.update({
+      where: { id },
+      data: updateData,
+      include: {
+        conciliation: true,
+        account: true,
+      },
+    })
+  }
+
+  async deleteConciliationExpense(id: string) {
+    const expense = await this.prisma.conciliationExpense.findUnique({
+      where: { id },
+      include: {
+        conciliation: true,
+      },
+    })
+
+    if (!expense) {
+      throw new NotFoundException("Conciliation expense not found")
+    }
+
+    if (expense.conciliation.status === ConciliationStatus.COMPLETED) {
+      throw new BadRequestException("Cannot delete expense from completed conciliation")
+    }
+
+    await this.prisma.conciliationExpense.delete({
+      where: { id },
+    })
+  }
+
+  async getConciliationExpensesByConciliation(conciliationId: string) {
+    return this.prisma.conciliationExpense.findMany({
+      where: { conciliationId },
+      include: {
+        account: {
+          select: {
+            accountCode: true,
+            accountName: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    })
+  }
+
+  // Advanced filtering
+  async fetchConciliationsAdvanced(companyId: string, filters: ConciliationFiltersDto) {
+    const { page = 1, limit = 10, type, status, bankAccountId, startDate, endDate, createdById, search } = filters
+    const skip = (page - 1) * limit
+
+    const where: any = { companyId }
+
+    if (type) where.type = type
+    if (status) where.status = status
+    if (bankAccountId) where.bankAccountId = bankAccountId
+    if (createdById) where.createdById = createdById
+
+    if (startDate && endDate) {
+      where.periodStart = {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      }
+    }
+
+    if (search) {
+      where.OR = [
+        { reference: { contains: search, mode: "insensitive" } },
+        { notes: { contains: search, mode: "insensitive" } },
+        { bankAccount: { accountNumber: { contains: search, mode: "insensitive" } } },
+      ]
+    }
+
+    const [conciliations, total] = await Promise.all([
+      this.prisma.conciliation.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          bankAccount: {
+            include: {
+              bank: true,
+            },
+          },
+          transaction: true,
+          createdBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          _count: {
+            select: {
+              items: true,
+              expenses: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      this.prisma.conciliation.count({ where }),
+    ])
+
+    return {
+      data: conciliations,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    }
+  }
+
+  // Statistics and reporting
+  async getConciliationStatistics(companyId: string, startDate?: string, endDate?: string) {
+    const where: any = { companyId }
+
+    if (startDate && endDate) {
+      where.createdAt = {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      }
+    }
+
+    const [total, completed, inProgress, pending] = await Promise.all([
+      this.prisma.conciliation.count({ where }),
+      this.prisma.conciliation.count({ where: { ...where, status: ConciliationStatus.COMPLETED } }),
+      this.prisma.conciliation.count({ where: { ...where, status: ConciliationStatus.IN_PROGRESS } }),
+      this.prisma.conciliation.count({ where: { ...where, status: ConciliationStatus.PENDING } }),
+    ])
+
+    const totalAmount = await this.prisma.conciliation.aggregate({
+      where: { ...where, status: ConciliationStatus.COMPLETED },
+      _sum: {
+        totalAmount: true,
+      },
+    })
+
+    return {
+      total,
+      completed,
+      inProgress,
+      pending,
+      completionRate: total > 0 ? (completed / total) * 100 : 0,
+      totalConciliatedAmount: totalAmount._sum.totalAmount || 0,
+    }
+  }
+
+  // Bulk operations
+  async bulkCompleteConciliations(conciliationIds: string[]) {
+    const results = []
+    for (const id of conciliationIds) {
+      try {
+        const result = await this.completeConciliation(id)
+        results.push({ id, success: true, data: result })
+      } catch (error) {
+        results.push({ id, success: false, error: error.message })
+      }
+    }
+    return results
+  }
+
+  async bulkAutoConciliate(conciliationIds: string[]) {
+    const results = []
+    for (const id of conciliationIds) {
+      try {
+        const result = await this.performAutomaticConciliation(id)
+        results.push({ id, success: true, data: result })
+      } catch (error) {
+        results.push({ id, success: false, error: error.message })
+      }
+    }
+    return results
+  }
+
+  // Export functionality
+  async exportConciliations(companyId: string, format: "csv" | "excel", filters: ConciliationFiltersDto) {
+    const conciliations = await this.fetchConciliationsAdvanced(companyId, { ...filters, limit: 10000 })
+
+    // This would typically generate actual CSV/Excel files
+    // For now, return the data structure
+    return {
+      format,
+      data: conciliations.data,
+      filename: `conciliations_${new Date().toISOString().split("T")[0]}.${format}`,
+      totalRecords: conciliations.total,
+    }
+  }
+
+  // Pending documents for conciliation
+  async getPendingDocumentsForConciliation(
+    companyId: string,
+    startDate?: string,
+    endDate?: string,
+    bankAccountId?: string,
+  ) {
+    const where: any = {
+      companyId,
+      status: "PENDING",
+      conciliationItems: {
+        none: {},
+      },
+    }
+
+    if (startDate && endDate) {
+      where.issueDate = {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      }
+    }
+
+    return this.prisma.document.findMany({
+      where,
+      include: {
+        supplier: {
+          select: {
+            businessName: true,
+            documentNumber: true,
+          },
+        },
+      },
+      orderBy: { issueDate: "desc" },
+    })
+  }
+
+  // Unmatched transactions
+  async getUnmatchedTransactions(companyId: string, startDate?: string, endDate?: string, bankAccountId?: string) {
+    const where: any = {
+      companyId,
+      conciliations: {
+        none: {},
+      },
+    }
+
+    if (bankAccountId) {
+      where.bankAccountId = bankAccountId
+    }
+
+    if (startDate && endDate) {
+      where.transactionDate = {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      }
+    }
+
+    return this.prisma.transaction.findMany({
+      where,
+      include: {
+        bankAccount: {
+          select: {
+            accountNumber: true,
+            alias: true,
+            bank: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { transactionDate: "desc" },
+    })
+  }
+
+  // Helper methods
+  private findDocumentCombinations(documents: any[], targetAmount: number, tolerance: number) {
+    const combinations = []
+
+    // Try pairs of documents
+    for (let i = 0; i < documents.length; i++) {
+      for (let j = i + 1; j < documents.length; j++) {
+        const total = Number(documents[i].total) + Number(documents[j].total)
+        const difference = targetAmount - total
+
+        if (Math.abs(difference) <= tolerance) {
+          combinations.push([
+            {
+              document: documents[i],
+              conciliatedAmount: Number(documents[i].total),
+              difference: 0,
+            },
+            {
+              document: documents[j],
+              conciliatedAmount: Number(documents[j].total),
+              difference: difference,
+            },
+          ])
+        }
+      }
+    }
+
+    return combinations
   }
 }

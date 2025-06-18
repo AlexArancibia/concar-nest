@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsOptional, IsObject, IsIP } from "class-validator"
+import { IsString, IsEnum, IsOptional, IsObject } from "class-validator"
 import { AuditAction } from "@prisma/client"
 
 export class CreateAuditLogDto {
@@ -15,22 +15,26 @@ export class CreateAuditLogDto {
   @IsString()
   entityId?: string
 
+  @IsOptional()
   @IsString()
-  description: string
+  description?: string
 
   @IsOptional()
   @IsObject()
-  oldValues?: Record<string, any>
+  oldValues?: any
 
   @IsOptional()
   @IsObject()
-  newValues?: Record<string, any>
+  newValues?: any
 
   @IsOptional()
-  @IsIP()
+  @IsString()
   ipAddress?: string
 
   @IsOptional()
   @IsString()
   userAgent?: string
+
+  @IsString()
+  companyId: string
 }

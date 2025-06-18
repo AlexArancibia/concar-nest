@@ -7,11 +7,7 @@ export class CreateBankAccountDto {
   companyId: string
 
   @IsString()
-  bankName: string
-
-  @IsOptional()
-  @IsString()
-  bankCode?: string
+  bankId: string
 
   @IsString()
   accountNumber: string
