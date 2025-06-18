@@ -1,48 +1,42 @@
 import {
   IsString,
-  IsNotEmpty,
-  IsOptional,
   IsEnum,
   IsDateString,
+  IsNumber,
+  IsOptional,
   IsBoolean,
   IsArray,
   ValidateNested,
-  IsNumber,
 } from "class-validator"
-import { Type, Transform } from "class-transformer"
+import { Type } from "class-transformer"
 import { DocumentType, DocumentStatus } from "@prisma/client"
 
 export class CreateDocumentLineDto {
-  @IsOptional()
-  @IsString()
-  productCode?: string
-
-  @IsNotEmpty()
   @IsString()
   description: string
 
-  @IsNotEmpty()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   quantity: number
 
   @IsOptional()
   @IsString()
-  unitCode?: string = "NIU"
-
-  @IsNotEmpty()
-  @Transform(({ value }) => Number.parseFloat(value))
-  unitPrice: number
+  productCode?: string
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  unitPriceWithTax?: number
+  @IsString()
+  unitCode?: string
 
-  @IsNotEmpty()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
+  unitPrice: number
+
+  @IsNumber()
+  unitPriceWithTax: number
+
+  @IsNumber()
   lineTotal: number
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   igvAmount?: number
 
   @IsOptional()
@@ -54,31 +48,15 @@ export class CreateDocumentLineDto {
   taxExemptionReason?: string
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  taxPercentage?: number
-
-  @IsOptional()
-  @IsString()
-  taxCategoryId?: string
-
-  @IsOptional()
   @IsString()
   taxSchemeId?: string
-
-  @IsOptional()
-  @IsString()
-  taxSchemeName?: string
-
-  @IsOptional()
-  @IsString()
-  taxTypeCode?: string
 
   @IsOptional()
   @IsString()
   priceTypeCode?: string
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   referencePrice?: number
 
   @IsOptional()
@@ -87,230 +65,119 @@ export class CreateDocumentLineDto {
 
   @IsOptional()
   @IsBoolean()
-  freeOfChargeIndicator?: boolean = false
+  freeOfChargeIndicator?: boolean
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   allowanceAmount?: number
 
   @IsOptional()
   @IsBoolean()
-  allowanceIndicator?: boolean = false
+  allowanceIndicator?: boolean
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   chargeAmount?: number
 
   @IsOptional()
   @IsBoolean()
-  chargeIndicator?: boolean = false
+  chargeIndicator?: boolean
 
   @IsOptional()
   @IsString()
   orderLineReference?: string
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  lineNotes?: string[]
+  @IsString()
+  lineNotes?: string
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   taxableAmount?: number
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   exemptAmount?: number
 
   @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   inaffectedAmount?: number
 
   @IsOptional()
   @IsString()
   xmlLineData?: string
 
-  // Campos adicionales que vienen del XML - permitir que el frontend los envíe
+  // Account and Cost Center Links
   @IsOptional()
-  @IsNumber()
-  lineNumber?: number
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDocumentLineAccountLinkDto)
+  accountLinks?: CreateDocumentLineAccountLinkDto[]
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDocumentLineCostCenterLinkDto)
+  costCenterLinks?: CreateDocumentLineCostCenterLinkDto[]
 }
 
-export class CreateDocumentDto {
-  @IsNotEmpty()
+export class CreateDocumentLineAccountLinkDto {
   @IsString()
-  companyId: string
+  accountId: string
 
-  @IsNotEmpty()
-  @IsEnum(DocumentType)
-  documentType: DocumentType
+  @IsNumber()
+  percentage: number
 
-  @IsNotEmpty()
+  @IsNumber()
+  amount: number
+}
+
+export class CreateDocumentLineCostCenterLinkDto {
   @IsString()
-  series: string
+  costCenterId: string
 
-  @IsNotEmpty()
-  @IsString()
-  number: string
+  @IsNumber()
+  percentage: number
 
-  @IsNotEmpty()
-  @IsString()
-  supplierId: string
+  @IsNumber()
+  amount: number
+}
 
-  @IsNotEmpty()
+export class CreateDocumentPaymentTermDto {
+  @IsNumber()
+  amount: number
+
   @IsDateString()
-  issueDate: string
-
-  @IsOptional()
-  @IsString()
-  issueTime?: string
-
-  @IsOptional()
-  @IsDateString()
-  dueDate?: string
-
-  @IsOptional()
-  @IsDateString()
-  receptionDate?: string
-
-  @IsOptional()
-  @IsString()
-  currency?: string = "PEN"
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  exchangeRate?: number
-
-  @IsNotEmpty()
-  @Transform(({ value }) => Number.parseFloat(value))
-  subtotal: number
-
-  @IsNotEmpty()
-  @Transform(({ value }) => Number.parseFloat(value))
-  igv: number
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  otherTaxes?: number
-
-  @IsNotEmpty()
-  @Transform(({ value }) => Number.parseFloat(value))
-  total: number
-
-  // Customer information
-  @IsOptional()
-  @IsString()
-  customerDocumentType?: string
-
-  @IsOptional()
-  @IsString()
-  customerDocumentNumber?: string
-
-  @IsOptional()
-  @IsString()
-  customerName?: string
-
-  @IsOptional()
-  @IsString()
-  customerAddress?: string
-
-  @IsOptional()
-  @IsString()
-  customerUbigeo?: string
-
-  @IsOptional()
-  @IsString()
-  customerDistrict?: string
-
-  @IsOptional()
-  @IsString()
-  customerProvince?: string
-
-  @IsOptional()
-  @IsString()
-  customerDepartment?: string
-
-  // Retention information
-  @IsOptional()
-  @IsBoolean()
-  hasRetention?: boolean = false
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  retentionAmount?: number
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  retentionPercentage?: number
-
-  // Detraction information
-  @IsOptional()
-  @IsBoolean()
-  hasDetraction?: boolean = false
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  detractionAmount?: number
-
-  @IsOptional()
-  @IsString()
-  detractionCode?: string
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  detractionPercentage?: number
-
-  @IsOptional()
-  @IsString()
-  detractionServiceCode?: string
-
-  @IsOptional()
-  @IsString()
-  detractionAccount?: string
-
-  // Payment information
-  @IsOptional()
-  @IsString()
-  paymentMethod?: string
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  creditAmount?: number
-
-  @IsOptional()
-  @IsDateString()
-  creditDueDate?: string
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  installmentAmount?: number
-
-  @IsOptional()
-  @IsDateString()
-  installmentDueDate?: string
-
-  @IsOptional()
-  @IsString()
-  paymentTermsJson?: string
+  dueDate: string
 
   @IsOptional()
   @IsString()
   description?: string
+}
 
-  @IsOptional()
+export class CreateDocumentAccountLinkDto {
   @IsString()
-  observations?: string
+  accountId: string
 
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  tags?: string[]
+  @IsNumber()
+  percentage: number
 
-  @IsOptional()
-  @IsEnum(DocumentStatus)
-  status?: DocumentStatus = DocumentStatus.PENDING
+  @IsNumber()
+  amount: number
+}
 
-  // XML information
+export class CreateDocumentCostCenterLinkDto {
+  @IsString()
+  costCenterId: string
+
+  @IsNumber()
+  percentage: number
+
+  @IsNumber()
+  amount: number
+}
+
+export class CreateDocumentXmlDataDto {
   @IsOptional()
   @IsString()
   xmlFileName?: string
@@ -335,7 +202,32 @@ export class CreateDocumentDto {
   @IsString()
   documentTypeDescription?: string
 
-  // Digital signature information
+  @IsOptional()
+  @IsString()
+  sunatResponseCode?: string
+
+  @IsOptional()
+  @IsString()
+  cdrStatus?: string
+
+  @IsOptional()
+  @IsDateString()
+  sunatProcessDate?: string
+
+  @IsOptional()
+  @IsString()
+  pdfFile?: string
+
+  @IsOptional()
+  @IsString()
+  qrCode?: string
+
+  @IsOptional()
+  @IsString()
+  xmlAdditionalData?: string
+}
+
+export class CreateDocumentDigitalSignatureDto {
   @IsOptional()
   @IsString()
   digitalSignatureId?: string
@@ -379,17 +271,124 @@ export class CreateDocumentDto {
   @IsOptional()
   @IsString()
   digestValue?: string
+}
 
-  // Additional files
+export class CreateDocumentDetractionDto {
+  @IsBoolean()
+  hasDetraction: boolean
+
+  @IsOptional()
+  @IsNumber()
+  amount?: number
+
   @IsOptional()
   @IsString()
-  pdfFile?: string
+  code?: string
+
+  @IsOptional()
+  @IsNumber()
+  percentage?: number
 
   @IsOptional()
   @IsString()
-  qrCode?: string
+  serviceCode?: string
 
-  // Additional information
+  @IsOptional()
+  @IsString()
+  account?: string
+
+  @IsOptional()
+  @IsDateString()
+  paymentDate?: string
+
+  @IsOptional()
+  @IsString()
+  paymentReference?: string
+}
+
+export class CreateDocumentDto {
+  @IsString()
+  companyId: string
+
+  @IsEnum(DocumentType)
+  documentType: DocumentType
+
+  @IsString()
+  series: string
+
+  @IsString()
+  number: string
+
+  @IsString()
+  supplierId: string
+
+  @IsDateString()
+  issueDate: string
+
+  @IsOptional()
+  @IsString()
+  issueTime?: string
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string
+
+  @IsOptional()
+  @IsDateString()
+  receptionDate?: string
+
+  @IsString()
+  currency: string
+
+  @IsOptional()
+  @IsNumber()
+  exchangeRate?: number
+
+  @IsNumber()
+  subtotal: number
+
+  @IsNumber()
+  igv: number
+
+  @IsOptional()
+  @IsNumber()
+  otherTaxes?: number
+
+  @IsNumber()
+  total: number
+
+  @IsOptional()
+  @IsBoolean()
+  hasRetention?: boolean
+
+  @IsOptional()
+  @IsNumber()
+  retentionAmount?: number
+
+  @IsOptional()
+  @IsNumber()
+  retentionPercentage?: number
+
+  @IsOptional()
+  @IsString()
+  paymentMethod?: string
+
+  @IsOptional()
+  @IsString()
+  description?: string
+
+  @IsOptional()
+  @IsString()
+  observations?: string
+
+  @IsOptional()
+  @IsString()
+  tags?: string
+
+  @IsOptional()
+  @IsEnum(DocumentStatus)
+  status?: DocumentStatus
+
   @IsOptional()
   @IsString()
   orderReference?: string
@@ -399,67 +398,57 @@ export class CreateDocumentDto {
   contractNumber?: string
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  additionalNotes?: string[]
+  @IsString()
+  additionalNotes?: string
 
   @IsOptional()
   @IsString()
-  xmlAdditionalData?: string
+  documentNotes?: string
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  documentNotes?: string[]
+  @IsString()
+  operationNotes?: string
 
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  operationNotes?: string[]
-
-  @IsNotEmpty()
   @IsString()
   createdById: string
 
-  // Campos calculados que vienen del XML - permitir que el frontend los envíe
-  @IsOptional()
-  @IsString()
-  fullNumber?: string
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  netPayableAmount?: number
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  conciliatedAmount?: number
-
-  @IsOptional()
-  @Transform(({ value }) => Number.parseFloat(value))
-  pendingAmount?: number
-
-  // SUNAT fields - permitir que vengan del XML si existen
-  @IsOptional()
-  @IsString()
-  sunatResponseCode?: string
-
-  @IsOptional()
-  @IsString()
-  cdrStatus?: string
-
-  @IsOptional()
-  @IsDateString()
-  sunatProcessDate?: string
-
-  // Audit fields
-  @IsOptional()
-  @IsString()
-  updatedById?: string
-
-  // Document lines
+  // Related entities
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateDocumentLineDto)
   lines?: CreateDocumentLineDto[]
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDocumentPaymentTermDto)
+  paymentTerms?: CreateDocumentPaymentTermDto[]
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDocumentAccountLinkDto)
+  accountLinks?: CreateDocumentAccountLinkDto[]
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateDocumentCostCenterLinkDto)
+  costCenterLinks?: CreateDocumentCostCenterLinkDto[]
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateDocumentXmlDataDto)
+  xmlData?: CreateDocumentXmlDataDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateDocumentDigitalSignatureDto)
+  digitalSignature?: CreateDocumentDigitalSignatureDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateDocumentDetractionDto)
+  detraction?: CreateDocumentDetractionDto
 }

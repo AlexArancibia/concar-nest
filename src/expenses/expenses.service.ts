@@ -190,7 +190,7 @@ export class ExpensesService {
       where: { id },
       data: {
         documentId,
-        status: ExpenseStatus.CONCILIATED,
+        status: ExpenseStatus.PROCESSED,
         reconciledAt: new Date(),
         reconciledById,
         updatedAt: new Date(),

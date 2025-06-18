@@ -1,52 +1,132 @@
-import { IsString, IsDateString, IsNumber, IsOptional, IsEnum, IsUUID } from "class-validator"
-import { ConciliationStatus } from "@prisma/client"
+import { IsString, IsEnum, IsDateString, IsDecimal, IsOptional, IsArray, ValidateNested, IsInt } from "class-validator"
 import { Type, Transform } from "class-transformer"
+import { ConciliationType, ConciliationStatus } from "@prisma/client"
+
+export class CreateConciliationExpenseDto {
+  @IsString()
+  description: string
+
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  amount: number
+
+  @IsEnum(["OPERATIONAL", "ADMINISTRATIVE", "FINANCIAL", "TAX", "OTHER"])
+  expenseType: "OPERATIONAL" | "ADMINISTRATIVE" | "FINANCIAL" | "TAX" | "OTHER"
+
+  @IsOptional()
+  @IsString()
+  accountId?: string
+
+  @IsOptional()
+  @IsString()
+  notes?: string
+
+  @IsOptional()
+  @Transform(({ value }) => value === "true" || value === true)
+  isTaxDeductible?: boolean = true
+
+  @IsOptional()
+  @IsString()
+  supportingDocument?: string
+
+  @IsDateString()
+  expenseDate: string
+}
 
 export class CreateConciliationDto {
   @IsString()
-  companyId: string;
+  companyId: string
 
   @IsString()
-  bankAccountId: string;
+  bankAccountId: string
 
+  @IsOptional()
   @IsString()
-  transactionId: string; // Nueva propiedad - una sola transacción
+  transactionId?: string
+
+  @IsOptional()
+  @IsEnum(ConciliationType)
+  type?: ConciliationType = ConciliationType.DOCUMENTS
+
+  @IsOptional()
+  @IsString()
+  reference?: string
 
   @IsDateString()
-  periodStart: string;
+  periodStart: string
 
   @IsDateString()
-  periodEnd: string;
+  periodEnd: string
 
-  @IsNumber()
   @IsOptional()
-  totalDocuments: number = 0;
+  @IsInt()
+  @Transform(({ value }) => Number.parseInt(value, 10))
+  totalDocuments?: number = 0
 
-  @IsNumber()
   @IsOptional()
-  conciliatedItems: number = 0;
+  @IsInt()
+  @Transform(({ value }) => Number.parseInt(value, 10))
+  conciliatedItems?: number = 0
 
-  @IsNumber()
   @IsOptional()
-  pendingItems: number = 0;
+  @IsInt()
+  @Transform(({ value }) => Number.parseInt(value, 10))
+  pendingItems?: number = 0
 
-  @IsNumber()
-  bankBalance: number;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  bankBalance: number
 
-  @IsNumber()
-  bookBalance: number;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  bookBalance: number
 
-  @IsNumber()
-  difference: number;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  difference: number
 
-  @IsNumber()
   @IsOptional()
-  toleranceAmount: number = 0.01;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  toleranceAmount?: number = 0
 
+  @IsOptional()
   @IsEnum(ConciliationStatus)
+  status?: ConciliationStatus = ConciliationStatus.PENDING
+
   @IsOptional()
-  status: ConciliationStatus = ConciliationStatus.PENDING;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  additionalExpensesTotal?: number = 0
+
+  @IsOptional()
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  totalAmount?: number
+
+  @IsOptional()
+  @IsDateString()
+  paymentDate?: string
+
+  @IsOptional()
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  paymentAmount?: number
+
+  @IsOptional()
+  @IsString()
+  notes?: string
 
   @IsString()
-  createdById: string;
+  createdById: string
+
+  @IsOptional()
+  @IsString()
+  approvedById?: string
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateConciliationExpenseDto)
+  expenses?: CreateConciliationExpenseDto[]
 }

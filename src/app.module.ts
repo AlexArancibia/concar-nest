@@ -15,7 +15,10 @@ import { CompaniesModule } from "./companies/companies.module"
 import { AuditLogsModule } from "./audit-logs/audit-logs.module"
 import { ConciliationsModule } from "./conciliations/conciliations.module"
 import { TransactionsModule } from "./transactions/transactions.module"
-import { SystemConfigModule } from "./system-config/system-config.module"
+import { SunatModule } from './sunat/sunat.module';
+import { AccountingModule } from './accounting/accounting.module';
+import { BanksModule } from './banks/banks.module';
+import { TaxSchemeModule } from './tax-scheme/tax-scheme.module';
  
 
 @Module({
@@ -43,10 +46,13 @@ import { SystemConfigModule } from "./system-config/system-config.module"
     AuditLogsModule,
     ConciliationsModule,
     TransactionsModule,
-    SystemConfigModule,
     CompaniesModule,
     ExpensesModule,
     SuppliersModule,
+    SunatModule,
+    AccountingModule,
+    BanksModule,
+    TaxSchemeModule,
   ],
 })
 export class AppModule {}

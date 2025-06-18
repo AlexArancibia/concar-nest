@@ -1,51 +1,58 @@
-import { IsString, IsEnum, IsNumber, IsOptional, IsUUID } from "class-validator"
+import { IsString, IsEnum, IsDecimal, IsOptional } from "class-validator"
+import { Transform } from "class-transformer"
 import { ConciliationItemType, ConciliationItemStatus } from "@prisma/client"
-import { Type, Transform } from "class-transformer"
 
 export class CreateConciliationItemDto {
   @IsString()
-  conciliationId: string;
+  conciliationId: string
 
   @IsEnum(ConciliationItemType)
-  itemType: ConciliationItemType;
+  itemType: ConciliationItemType
 
+  @IsOptional()
   @IsString()
-  documentId: string;
+  documentId?: string
 
-  @IsNumber()
-  documentAmount: number;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  documentAmount: number
 
-  @IsNumber()
-  conciliatedAmount: number;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  conciliatedAmount: number
 
-  @IsNumber()
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  difference: number
+
   @IsOptional()
-  difference: number = 0;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  distributionPercentage?: number = 100
 
-  @IsNumber()
   @IsOptional()
-  distributionPercentage?: number;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  detractionAmount?: number = 0
 
-  @IsNumber()
   @IsOptional()
-  detractionAmount?: number;
+  @IsDecimal()
+  @Transform(({ value }) => Number.parseFloat(value))
+  retentionAmount?: number = 0
 
-  @IsNumber()
   @IsOptional()
-  retentionAmount?: number;
-
   @IsEnum(ConciliationItemStatus)
-  @IsOptional()
-  status: ConciliationItemStatus = ConciliationItemStatus.PENDING;
+  status?: ConciliationItemStatus = ConciliationItemStatus.PENDING
 
-  @IsString()
   @IsOptional()
-  notes: string = '';
-
   @IsString()
+  notes?: string
+
   @IsOptional()
-  systemNotes?: string;
-
   @IsString()
-  conciliatedBy: string;
+  systemNotes?: string
+
+  @IsOptional()
+  @IsString()
+  conciliatedBy?: string
 }

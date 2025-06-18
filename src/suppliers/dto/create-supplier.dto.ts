@@ -1,12 +1,47 @@
-import { IsString, IsEnum, IsOptional, IsBoolean, IsNumber, IsEmail, IsInt } from "class-validator"
-import { SupplierType, SupplierStatus } from "@prisma/client"
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsEnum,
+  IsBoolean,
+  IsDecimal,
+  IsInt,
+  IsArray,
+  ValidateNested,
+  IsNotEmpty,
+  IsNumber,
+} from "class-validator"
 import { Type, Transform } from "class-transformer"
+import { SupplierType, SupplierStatus, BankAccountType } from "@prisma/client"
+
+class CreateSupplierBankAccountDto {
+  @IsString()
+  @IsNotEmpty()
+  bankId: string
+
+  @IsString()
+  @IsNotEmpty()
+  accountNumber: string
+
+  @IsEnum(BankAccountType)
+  accountType: BankAccountType
+
+  @IsString()
+  @IsNotEmpty()
+  currency: string
+
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean
+}
 
 export class CreateSupplierDto {
   @IsString()
+  @IsNotEmpty()
   companyId: string
 
   @IsString()
+  @IsNotEmpty()
   businessName: string
 
   @IsOptional()
@@ -14,9 +49,11 @@ export class CreateSupplierDto {
   tradeName?: string
 
   @IsString()
+  @IsNotEmpty()
   documentType: string
 
   @IsString()
+  @IsNotEmpty()
   documentNumber: string
 
   @IsEnum(SupplierType)
@@ -56,14 +93,11 @@ export class CreateSupplierDto {
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   creditLimit?: number
+
 
   @IsOptional()
   @IsInt()
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseInt(value, 10) : value))
   paymentTerms?: number
 
   @IsOptional()
@@ -75,11 +109,13 @@ export class CreateSupplierDto {
   isRetentionAgent?: boolean = false
 
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
+  @IsDecimal({ decimal_digits: "4" })
+  @Transform(({ value }) => (value ? Number.parseFloat(value) : undefined))
   retentionRate?: number
 
   @IsOptional()
-  bankAccounts?: any
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateSupplierBankAccountDto)
+  supplierBankAccounts?: CreateSupplierBankAccountDto[]
 }

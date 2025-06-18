@@ -1,22 +1,25 @@
-import { IsString, IsEnum, IsDateString, IsNumber, IsOptional, IsBoolean } from "class-validator"
-import { TransactionType } from "@prisma/client"
-import { Type, Transform } from "class-transformer"
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsNumber, IsDateString, IsBoolean } from "class-validator"
+import { Type } from "class-transformer"
+import { TransactionType, TransactionStatus } from "@prisma/client"
 
 export class CreateTransactionDto {
   @IsString()
+  @IsNotEmpty()
   companyId: string
 
   @IsString()
+  @IsNotEmpty()
   bankAccountId: string
 
   @IsDateString()
-  transactionDate: string
+  transactionDate: Date
 
   @IsOptional()
   @IsDateString()
-  valueDate?: string
+  valueDate?: Date
 
   @IsString()
+  @IsNotEmpty()
   description: string
 
   @IsEnum(TransactionType)
@@ -24,20 +27,19 @@ export class CreateTransactionDto {
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   amount: number
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   balance: number
 
   @IsOptional()
   @IsString()
   branch?: string
 
+  @IsOptional()
   @IsString()
-  operationNumber: string
+  operationNumber?: string
 
   @IsOptional()
   @IsString()
@@ -64,6 +66,10 @@ export class CreateTransactionDto {
   fileName?: string
 
   @IsOptional()
+  @IsDateString()
+  importedAt?: Date
+
+  @IsOptional()
   @IsBoolean()
   isITF?: boolean = false
 
@@ -82,4 +88,17 @@ export class CreateTransactionDto {
   @IsOptional()
   @IsString()
   supplierId?: string
+
+  @IsOptional()
+  @IsEnum(TransactionStatus)
+  status?: TransactionStatus = TransactionStatus.PENDING
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
+  conciliatedAmount?: number = 0
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
+  pendingAmount: number
 }
