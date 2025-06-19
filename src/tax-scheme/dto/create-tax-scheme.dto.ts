@@ -1,26 +1,29 @@
-import { IsString, IsNumber, IsOptional, IsBoolean } from "class-validator"
+import { IsString, IsOptional, IsNumber, IsBoolean } from "class-validator"
 
 export class CreateTaxSchemeDto {
   @IsString()
-  companyId: string
+  taxSchemeId: string
 
   @IsString()
-  code: string
+  taxSchemeName: string
 
+  @IsOptional()
   @IsString()
-  name: string
+  taxCategoryId?: string
+
+  @IsOptional()
+  @IsString()
+  taxTypeCode?: string
+
+  @IsOptional()
+  @IsNumber()
+  taxPercentage?: number
 
   @IsOptional()
   @IsString()
   description?: string
 
-  @IsNumber()
-  rate: number
-
   @IsOptional()
   @IsBoolean()
   isActive?: boolean
-
-  @IsString()
-  createdById: string
 }
