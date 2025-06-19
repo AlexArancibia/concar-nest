@@ -4,7 +4,8 @@ import { ExpenseType } from "@prisma/client"
 
 export class CreateConciliationExpenseDto {
   @IsString()
-  conciliationId: string
+  @IsOptional()
+  conciliationId?: string
 
   @IsString()
   description: string

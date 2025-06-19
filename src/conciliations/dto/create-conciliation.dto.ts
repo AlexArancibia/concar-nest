@@ -1,37 +1,8 @@
 import { IsString, IsEnum, IsDateString, IsDecimal, IsOptional, IsArray, ValidateNested, IsInt, IsNumber } from "class-validator"
 import { Type, Transform } from "class-transformer"
 import { ConciliationType, ConciliationStatus } from "@prisma/client"
+import { CreateConciliationExpenseDto } from "./create-conciliation-expense.dto"
 
-export class CreateConciliationExpenseDto {
-  @IsString()
-  description: string
-
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
-  amount: number
-
-  @IsEnum(["OPERATIONAL", "ADMINISTRATIVE", "FINANCIAL", "TAX", "OTHER"])
-  expenseType: "OPERATIONAL" | "ADMINISTRATIVE" | "FINANCIAL" | "TAX" | "OTHER"
-
-  @IsOptional()
-  @IsString()
-  accountId?: string
-
-  @IsOptional()
-  @IsString()
-  notes?: string
-
-  @IsOptional()
-  @Transform(({ value }) => value === "true" || value === true)
-  isTaxDeductible?: boolean = true
-
-  @IsOptional()
-  @IsString()
-  supportingDocument?: string
-
-  @IsDateString()
-  expenseDate: string
-}
 
 export class CreateConciliationDto {
   @IsString()
@@ -123,3 +94,6 @@ export class CreateConciliationDto {
   @Type(() => CreateConciliationExpenseDto)
   expenses?: CreateConciliationExpenseDto[]
 }
+
+
+

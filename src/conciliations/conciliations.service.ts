@@ -622,37 +622,43 @@ export class ConciliationsService {
 
   // ConciliationExpense CRUD operations
   async createConciliationExpense(createExpenseDto: CreateConciliationExpenseDto) {
-    // Verify conciliation exists
-    const conciliation = await this.prisma.conciliation.findUnique({
-      where: { id: createExpenseDto.conciliationId },
-    })
-
-    if (!conciliation) {
-      throw new NotFoundException("Conciliation not found")
-    }
-
-    return this.prisma.conciliationExpense.create({
-      data: {
-        ...createExpenseDto,
-        expenseDate: new Date(createExpenseDto.expenseDate),
-      },
-      include: {
-        conciliation: {
-          select: {
-            id: true,
-            reference: true,
-            status: true,
-          },
-        },
-        account: {
-          select: {
-            accountCode: true,
-            accountName: true,
-          },
-        },
-      },
-    })
+  // Verificar que conciliationId esté presente
+  if (!createExpenseDto.conciliationId) {
+    throw new BadRequestException("conciliationId is required")
   }
+
+  // Verify conciliation exists
+  const conciliation = await this.prisma.conciliation.findUnique({
+    where: { id: createExpenseDto.conciliationId },
+  })
+
+  if (!conciliation) {
+    throw new NotFoundException("Conciliation not found")
+  }
+
+  return this.prisma.conciliationExpense.create({
+    data: {
+      ...createExpenseDto,
+      conciliationId: createExpenseDto.conciliationId, // Asegurar que no sea undefined
+      expenseDate: new Date(createExpenseDto.expenseDate),
+    },
+    include: {
+      conciliation: {
+        select: {
+          id: true,
+          reference: true,
+          status: true,
+        },
+      },
+      account: {
+        select: {
+          accountCode: true,
+          accountName: true,
+        },
+      },
+    },
+  })
+}
 
   async getConciliationExpenseById(id: string) {
     const expense = await this.prisma.conciliationExpense.findUnique({
@@ -660,7 +666,7 @@ export class ConciliationsService {
       include: {
         conciliation: true,
         account: true,
-      },
+      },  
     })
 
     if (!expense) {
