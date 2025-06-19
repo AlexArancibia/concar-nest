@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsDecimal, IsOptional } from "class-validator"
+import { IsString, IsEnum, IsDecimal, IsOptional, IsNumber } from "class-validator"
 import { Transform } from "class-transformer"
 import { ConciliationItemType, ConciliationItemStatus } from "@prisma/client"
 
@@ -13,31 +13,25 @@ export class CreateConciliationItemDto {
   @IsString()
   documentId?: string
 
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   documentAmount: number
 
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   conciliatedAmount: number
 
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   difference: number
 
   @IsOptional()
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   distributionPercentage?: number = 100
 
   @IsOptional()
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   detractionAmount?: number = 0
 
   @IsOptional()
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   retentionAmount?: number = 0
 
   @IsOptional()
