@@ -43,7 +43,7 @@ export class TransactionsController {
     @Body("companyId") companyId: string,
     @Body("bankAccountId") bankAccountId: string,
   ) {
-    // Aquí implementarías el parser del archivo Excel/CSV
+    // Aquí implementarías el parser del archivo Excel/CSV dd
     const transactions = [] // Parsear el archivo
     const fileName = file.originalname
 
