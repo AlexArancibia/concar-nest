@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsDateString, IsDecimal, IsOptional, IsArray, ValidateNested, IsInt } from "class-validator"
+import { IsString, IsEnum, IsDateString, IsDecimal, IsOptional, IsArray, ValidateNested, IsInt, IsNumber } from "class-validator"
 import { Type, Transform } from "class-transformer"
 import { ConciliationType, ConciliationStatus } from "@prisma/client"
 
@@ -73,21 +73,17 @@ export class CreateConciliationDto {
   @Transform(({ value }) => Number.parseInt(value, 10))
   pendingItems?: number = 0
 
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   bankBalance: number
 
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   bookBalance: number
 
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   difference: number
 
   @IsOptional()
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   toleranceAmount?: number = 0
 
   @IsOptional()
@@ -95,13 +91,11 @@ export class CreateConciliationDto {
   status?: ConciliationStatus = ConciliationStatus.PENDING
 
   @IsOptional()
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   additionalExpensesTotal?: number = 0
 
   @IsOptional()
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   totalAmount?: number
 
   @IsOptional()
@@ -109,8 +103,7 @@ export class CreateConciliationDto {
   paymentDate?: string
 
   @IsOptional()
-  @IsDecimal()
-  @Transform(({ value }) => Number.parseFloat(value))
+  @IsNumber()
   paymentAmount?: number
 
   @IsOptional()
