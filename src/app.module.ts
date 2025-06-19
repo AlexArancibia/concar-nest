@@ -18,7 +18,7 @@ import { TransactionsModule } from "./transactions/transactions.module"
 import { SunatModule } from './sunat/sunat.module';
 import { AccountingModule } from './accounting/accounting.module';
 import { BanksModule } from './banks/banks.module';
-import { TaxSchemeModule } from './tax-scheme/tax-scheme.module';
+import { TaxSchemesModule } from "./tax-scheme/tax-scheme.module"
  
 
 @Module({
@@ -52,7 +52,7 @@ import { TaxSchemeModule } from './tax-scheme/tax-scheme.module';
     SunatModule,
     AccountingModule,
     BanksModule,
-    TaxSchemeModule,
+    TaxSchemesModule,
   ],
 })
 export class AppModule {}
