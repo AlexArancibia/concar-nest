@@ -1,104 +1,89 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsNumber, IsDateString, IsBoolean } from "class-validator"
-import { Type } from "class-transformer"
+import { IsString, IsNotEmpty, IsDateString, IsEnum, IsNumber, IsOptional, IsUUID } from "class-validator"
+import { Transform, Type } from "class-transformer"
 import { TransactionType, TransactionStatus } from "@prisma/client"
 
 export class CreateTransactionDto {
-  @IsString()
   @IsNotEmpty()
   companyId: string
 
-  @IsString()
   @IsNotEmpty()
   bankAccountId: string
 
   @IsDateString()
-  transactionDate: Date
+  @IsNotEmpty()
+  transactionDate: string
 
-  @IsOptional()
   @IsDateString()
-  valueDate?: Date
+  @IsOptional()
+  valueDate?: string
 
   @IsString()
   @IsNotEmpty()
   description: string
 
   @IsEnum(TransactionType)
+  @IsNotEmpty()
   transactionType: TransactionType
 
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   @Type(() => Number)
   amount: number
 
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   @Type(() => Number)
   balance: number
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   branch?: string
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   operationNumber?: string
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   operationTime?: string
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   operatorUser?: string
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   utc?: string
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   reference?: string
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   channel?: string
 
-  @IsOptional()
   @IsString()
+  @IsOptional()
   fileName?: string
 
-  @IsOptional()
   @IsDateString()
-  importedAt?: Date
-
   @IsOptional()
-  @IsBoolean()
-  isITF?: boolean = false
+  importedAt?: string
 
-  @IsOptional()
-  @IsBoolean()
-  isDetraction?: boolean = false
-
-  @IsOptional()
-  @IsBoolean()
-  isBankFee?: boolean = false
-
-  @IsOptional()
-  @IsBoolean()
-  isTransfer?: boolean = false
-
-  @IsOptional()
-  @IsString()
-  supplierId?: string
-
-  @IsOptional()
   @IsEnum(TransactionStatus)
+  @IsOptional()
   status?: TransactionStatus = TransactionStatus.PENDING
 
-  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   @Type(() => Number)
-  conciliatedAmount?: number = 0
+  @IsOptional()
+  conciliatedAmount?: number
 
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
   @Type(() => Number)
-  pendingAmount: number
+  @IsOptional()
+  pendingAmount?: number
 }

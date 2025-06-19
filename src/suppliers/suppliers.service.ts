@@ -40,7 +40,6 @@ export class SuppliersService {
           _count: {
             select: {
               documents: true,
-              transactions: true,
               expenses: true,
             },
           },
@@ -150,7 +149,6 @@ export class SuppliersService {
         _count: {
           select: {
             documents: true,
-            transactions: true,
             expenses: true,
           },
         },
@@ -225,7 +223,6 @@ export class SuppliersService {
         _count: {
           select: {
             documents: true,
-            transactions: true,
             expenses: true,
           },
         },
@@ -238,7 +235,7 @@ export class SuppliersService {
 
     // Check if supplier has related records
     const hasRelatedRecords =
-      supplier._count.documents > 0 || supplier._count.transactions > 0 || supplier._count.expenses > 0
+      supplier._count.documents > 0  || supplier._count.expenses > 0
 
     if (hasRelatedRecords) {
       throw new BadRequestException(
@@ -368,7 +365,6 @@ export class SuppliersService {
           _count: {
             select: {
               documents: true,
-              transactions: true,
               expenses: true,
             },
           },

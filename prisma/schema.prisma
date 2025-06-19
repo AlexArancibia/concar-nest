@@ -71,9 +71,14 @@ enum DocumentStatus {
 enum TransactionType {
   DEBIT
   CREDIT
-  TRANSFER
-  FEE
+  TRANSFER 
+  FEE 
   INTEREST
+  DETRACTION 
+  ITF 
+  PAYMENT 
+  DEPOSIT 
+  WITHDRAWAL 
 }
 
 enum TransactionStatus {
@@ -352,7 +357,6 @@ model Supplier {
   // Relations
   company            Company               @relation(fields: [companyId], references: [id])
   documents          Document[]
-  transactions       Transaction[]
   expenses           Expense[]
   supplierBankAccounts SupplierBankAccount[]
 
@@ -686,14 +690,9 @@ model Transaction {
   channel             String?
   fileName            String?
   importedAt          DateTime?
-  isITF               Boolean           @default(false)
-  isDetraction        Boolean           @default(false)
-  isBankFee           Boolean           @default(false)
-  isTransfer          Boolean           @default(false)
-  supplierId          String?
   status              TransactionStatus @default(PENDING)
-  conciliatedAmount   Decimal           @default(0) @db.Decimal(15, 2)
-  pendingAmount       Decimal           @db.Decimal(15, 2)
+  conciliatedAmount   Decimal?          @db.Decimal(15, 2)
+  pendingAmount       Decimal?          @db.Decimal(15, 2)
   transactionHash     String            @unique
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
@@ -701,7 +700,6 @@ model Transaction {
   // Relations
   company                 Company                   @relation(fields: [companyId], references: [id])
   bankAccount             BankAccount               @relation(fields: [bankAccountId], references: [id])
-  supplier                Supplier?                 @relation(fields: [supplierId], references: [id])
   conciliations           Conciliation[]
 
   @@map("transactions")

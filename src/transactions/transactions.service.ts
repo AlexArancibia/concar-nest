@@ -1,10 +1,9 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common"
-import { Prisma } from "@prisma/client"
-import  { PrismaService } from "../prisma/prisma.service"
-import  { CreateTransactionDto } from "./dto/create-transaction.dto"
-import  { UpdateTransactionDto } from "./dto/update-transaction.dto"
-import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import  { Transaction, TransactionStatus, TransactionType } from "@prisma/client"
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common"
+import { PrismaService } from "../prisma/prisma.service"
+import { CreateTransactionDto } from "./dto/create-transaction.dto"
+import { UpdateTransactionDto } from "./dto/update-transaction.dto"
+import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
+import { Transaction, TransactionStatus } from "@prisma/client"
 import { createHash } from "crypto"
 
 @Injectable()
@@ -15,62 +14,45 @@ export class TransactionsService {
     const { page = 1, limit = 10 } = pagination
     const skip = (page - 1) * limit
 
-    const where = {
-      companyId,
-    }
-
     const [transactions, total] = await Promise.all([
       this.prisma.transaction.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { transactionDate: "desc" },
+        where: { companyId },
         include: {
-          company: {
-            select: { id: true, name: true, ruc: true },
-          },
           bankAccount: {
-            select: {
-              id: true,
-              accountNumber: true,
-              alias: true,
-              bank: { select: { name: true, code: true } },
-              currencyRef: { select: { code: true, name: true, symbol: true } },
-            },
-          },
-          supplier: {
-            select: {
-              id: true,
-              businessName: true,
-              documentNumber: true,
+            include: {
+              bank: true,
+              currencyRef: true,
             },
           },
         },
+        orderBy: { transactionDate: "desc" },
+        skip,
+        take: limit,
       }),
-      this.prisma.transaction.count({ where }),
+      this.prisma.transaction.count({
+        where: { companyId },
+      }),
     ])
-
-    const totalPages = Math.ceil(total / limit)
 
     return {
       data: transactions,
       total,
       page,
       limit,
-      totalPages,
+      totalPages: Math.ceil(total / limit),
     }
   }
 
   async createTransaction(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
-    const { companyId, bankAccountId, supplierId, ...transactionData } = createTransactionDto
+    const { companyId, bankAccountId, transactionDate, description, transactionType, amount, balance, ...otherFields } =
+      createTransactionDto
 
     // Verify company exists
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
     })
-
     if (!company) {
-      throw new NotFoundException(`Company with ID ${companyId} not found`)
+      throw new NotFoundException("Company not found")
     }
 
     // Verify bank account exists and belongs to company
@@ -80,88 +62,50 @@ export class TransactionsService {
         companyId,
       },
     })
-
     if (!bankAccount) {
-      throw new NotFoundException(`Bank account with ID ${bankAccountId} not found for company ${companyId}`)
-    }
-
-    // Verify supplier exists if provided
-    if (supplierId) {
-      const supplier = await this.prisma.supplier.findFirst({
-        where: {
-          id: supplierId,
-          companyId,
-        },
-      })
-
-      if (!supplier) {
-        throw new NotFoundException(`Supplier with ID ${supplierId} not found for company ${companyId}`)
-      }
+      throw new NotFoundException("Bank account not found or does not belong to company")
     }
 
     // Generate transaction hash for uniqueness
     const transactionHash = this.generateTransactionHash({
       bankAccountId,
-      transactionDate: transactionData.transactionDate,
-      amount: transactionData.amount,
-      description: transactionData.description,
-      operationNumber: transactionData.operationNumber,
+      transactionDate: new Date(transactionDate),
+      description,
+      amount,
+      operationNumber: otherFields.operationNumber,
     })
 
     // Check for duplicate transaction
     const existingTransaction = await this.prisma.transaction.findUnique({
       where: { transactionHash },
     })
-
     if (existingTransaction) {
-      throw new ConflictException("Transaction with same details already exists")
+      throw new BadRequestException("Transaction already exists")
     }
 
-    // Convert numbers to Prisma.Decimal
-    const amount = new Prisma.Decimal(transactionData.amount)
-    const balance = new Prisma.Decimal(transactionData.balance)
-    const conciliatedAmount = new Prisma.Decimal(transactionData.conciliatedAmount || 0)
-    const pendingAmount = new Prisma.Decimal(transactionData.pendingAmount)
-
-    const transaction = await this.prisma.transaction.create({
+    return this.prisma.transaction.create({
       data: {
-        ...transactionData,
-        amount,
-        balance,
-        conciliatedAmount,
-        pendingAmount,
         companyId,
         bankAccountId,
-        supplierId,
+        transactionDate: new Date(transactionDate),
+        valueDate: otherFields.valueDate ? new Date(otherFields.valueDate) : undefined,
+        description,
+        transactionType,
+        amount,
+        balance,
         transactionHash,
+        importedAt: otherFields.importedAt ? new Date(otherFields.importedAt) : undefined,
+        ...otherFields,
       },
       include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
         bankAccount: {
-          select: {
-            id: true,
-            accountNumber: true,
-            alias: true,
-            bank: { select: { name: true, code: true } },
-            currencyRef: { select: { code: true, name: true, symbol: true } },
-          },
-        },
-        supplier: {
-          select: {
-            id: true,
-            businessName: true,
-            documentNumber: true,
+          include: {
+            bank: true,
+            currencyRef: true,
           },
         },
       },
     })
-
-    // Update bank account balance
-    await this.updateBankAccountBalance(bankAccountId, amount, transactionData.transactionType)
-
-    return transaction
   }
 
   async importTransactionsFromFile(
@@ -170,63 +114,38 @@ export class TransactionsService {
     transactions: any[],
     fileName: string,
   ): Promise<{ imported: number; duplicates: number; errors: string[] }> {
-    // Verify company and bank account
-    const bankAccount = await this.prisma.bankAccount.findFirst({
-      where: {
-        id: bankAccountId,
-        companyId,
-      },
-    })
-
-    if (!bankAccount) {
-      throw new NotFoundException(`Bank account with ID ${bankAccountId} not found for company ${companyId}`)
-    }
-
     let imported = 0
     let duplicates = 0
     const errors: string[] = []
 
     for (const [index, transactionData] of transactions.entries()) {
       try {
-        // Generate transaction hash
         const transactionHash = this.generateTransactionHash({
           bankAccountId,
           transactionDate: transactionData.transactionDate,
-          amount: transactionData.amount,
           description: transactionData.description,
+          amount: transactionData.amount,
           operationNumber: transactionData.operationNumber,
         })
 
         // Check for duplicate
-        const existingTransaction = await this.prisma.transaction.findUnique({
+        const existing = await this.prisma.transaction.findUnique({
           where: { transactionHash },
         })
 
-        if (existingTransaction) {
+        if (existing) {
           duplicates++
           continue
         }
 
-        // Convert to Prisma.Decimal
-        const amount = new Prisma.Decimal(transactionData.amount)
-        const balance = new Prisma.Decimal(transactionData.balance)
-        const conciliatedAmount = new Prisma.Decimal(0)
-        const pendingAmount = amount // Initially, pending amount equals total amount
-
-        // Create transaction
         await this.prisma.transaction.create({
           data: {
-            ...transactionData,
-            amount,
-            balance,
-            pendingAmount,
-            conciliatedAmount,
             companyId,
             bankAccountId,
             transactionHash,
             fileName,
             importedAt: new Date(),
-            status: TransactionStatus.PENDING,
+            ...transactionData,
           },
         })
 
@@ -243,39 +162,18 @@ export class TransactionsService {
     const transaction = await this.prisma.transaction.findUnique({
       where: { id },
       include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
         bankAccount: {
-          select: {
-            id: true,
-            accountNumber: true,
-            alias: true,
-            bank: { select: { name: true, code: true } },
-            currencyRef: { select: { code: true, name: true, symbol: true } },
+          include: {
+            bank: true,
+            currencyRef: true,
           },
         },
-        supplier: {
-          select: {
-            id: true,
-            businessName: true,
-            documentNumber: true,
-          },
-        },
-        conciliations: {
-          select: {
-            id: true,
-            reference: true,
-            status: true,
-            totalAmount: true,
-            createdAt: true,
-          },
-        },
+        company: true,
       },
     })
 
     if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${id} not found`)
+      throw new NotFoundException("Transaction not found")
     }
 
     return transaction
@@ -287,100 +185,42 @@ export class TransactionsService {
     })
 
     if (!existingTransaction) {
-      throw new NotFoundException(`Transaction with ID ${id} not found`)
+      throw new NotFoundException("Transaction not found")
     }
 
-    // Convert update data to Prisma.Decimal where needed
+    // Prepare update data with proper date conversion
     const updateData: any = { ...updateTransactionDto }
 
-    if (updateTransactionDto.amount !== undefined) {
-      updateData.amount = new Prisma.Decimal(updateTransactionDto.amount)
+    // Convert date strings to Date objects for Prisma
+    if (updateTransactionDto.transactionDate) {
+      updateData.transactionDate = new Date(updateTransactionDto.transactionDate)
+    }
+    if (updateTransactionDto.valueDate) {
+      updateData.valueDate = new Date(updateTransactionDto.valueDate)
     }
 
-    if (updateTransactionDto.balance !== undefined) {
-      updateData.balance = new Prisma.Decimal(updateTransactionDto.balance)
-    }
-
-    if (updateTransactionDto.conciliatedAmount !== undefined) {
-      updateData.conciliatedAmount = new Prisma.Decimal(updateTransactionDto.conciliatedAmount)
-    }
-
-    // Calculate pending amount if amount or conciliatedAmount is being updated
-    if (updateTransactionDto.amount !== undefined || updateTransactionDto.conciliatedAmount !== undefined) {
-      const newAmount =
-        updateTransactionDto.amount !== undefined
-          ? new Prisma.Decimal(updateTransactionDto.amount)
-          : existingTransaction.amount
-
-      const newConciliatedAmount =
-        updateTransactionDto.conciliatedAmount !== undefined
-          ? new Prisma.Decimal(updateTransactionDto.conciliatedAmount)
-          : existingTransaction.conciliatedAmount
-
-      updateData.pendingAmount = newAmount.sub(newConciliatedAmount)
-    } else if (updateTransactionDto.pendingAmount !== undefined) {
-      updateData.pendingAmount = new Prisma.Decimal(updateTransactionDto.pendingAmount)
-    }
-
-    const transaction = await this.prisma.transaction.update({
+    return this.prisma.transaction.update({
       where: { id },
-      data: {
-        ...updateData,
-        updatedAt: new Date(),
-      },
+      data: updateData,
       include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
         bankAccount: {
-          select: {
-            id: true,
-            accountNumber: true,
-            alias: true,
-            bank: { select: { name: true, code: true } },
-            currencyRef: { select: { code: true, name: true, symbol: true } },
-          },
-        },
-        supplier: {
-          select: {
-            id: true,
-            businessName: true,
-            documentNumber: true,
+          include: {
+            bank: true,
+            currencyRef: true,
           },
         },
       },
     })
-
-    return transaction
   }
 
   async deleteTransaction(id: string): Promise<void> {
     const transaction = await this.prisma.transaction.findUnique({
       where: { id },
-      include: {
-        _count: {
-          select: {
-            conciliations: true,
-          },
-        },
-      },
     })
 
     if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${id} not found`)
+      throw new NotFoundException("Transaction not found")
     }
-
-    // Check if transaction has conciliations
-    if (transaction._count.conciliations > 0) {
-      throw new BadRequestException("Cannot delete transaction with existing conciliations")
-    }
-
-    // Reverse bank account balance update
-    await this.updateBankAccountBalance(
-      transaction.bankAccountId,
-      transaction.amount.neg(),
-      transaction.transactionType,
-    )
 
     await this.prisma.transaction.delete({
       where: { id },
@@ -388,26 +228,9 @@ export class TransactionsService {
   }
 
   async getTransactionsByBankAccount(bankAccountId: string): Promise<Transaction[]> {
-    const bankAccount = await this.prisma.bankAccount.findUnique({
-      where: { id: bankAccountId },
-    })
-
-    if (!bankAccount) {
-      throw new NotFoundException(`Bank account with ID ${bankAccountId} not found`)
-    }
-
     return this.prisma.transaction.findMany({
       where: { bankAccountId },
       orderBy: { transactionDate: "desc" },
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            businessName: true,
-            documentNumber: true,
-          },
-        },
-      },
     })
   }
 
@@ -417,24 +240,14 @@ export class TransactionsService {
         companyId,
         status,
       },
-      orderBy: { transactionDate: "desc" },
       include: {
         bankAccount: {
-          select: {
-            id: true,
-            accountNumber: true,
-            alias: true,
-            bank: { select: { name: true, code: true } },
-          },
-        },
-        supplier: {
-          select: {
-            id: true,
-            businessName: true,
-            documentNumber: true,
+          include: {
+            bank: true,
           },
         },
       },
+      orderBy: { transactionDate: "desc" },
     })
   }
 
@@ -447,154 +260,25 @@ export class TransactionsService {
           lte: endDate,
         },
       },
-      orderBy: { transactionDate: "desc" },
       include: {
         bankAccount: {
-          select: {
-            id: true,
-            accountNumber: true,
-            alias: true,
-            bank: { select: { name: true, code: true } },
-          },
-        },
-        supplier: {
-          select: {
-            id: true,
-            businessName: true,
-            documentNumber: true,
+          include: {
+            bank: true,
           },
         },
       },
+      orderBy: { transactionDate: "desc" },
     })
   }
 
-  // Additional utility methods
-  async getTransactionStats(companyId: string) {
-    const stats = await this.prisma.transaction.groupBy({
-      by: ["status", "transactionType"],
-      where: { companyId },
-      _count: { status: true },
-      _sum: { amount: true },
-    })
-
-    const totalTransactions = await this.prisma.transaction.count({
-      where: { companyId },
-    })
-
-    return {
-      total: totalTransactions,
-      byStatus: stats.reduce(
-        (acc, stat) => {
-          const key = `${stat.status}_${stat.transactionType}`
-          acc[key] = {
-            count: stat._count.status,
-            amount: stat._sum.amount?.toNumber() || 0, // Convert Decimal to number
-          }
-          return acc
-        },
-        {} as Record<string, { count: number; amount: number }>,
-      ),
-    }
-  }
-
-  async searchTransactions(
-    companyId: string,
-    searchTerm: string,
-    pagination: PaginationDto,
-  ): Promise<PaginatedResponse<Transaction>> {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
-
-    const where: Prisma.TransactionWhereInput = {
-      companyId,
-      OR: [
-        { description: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
-        { operationNumber: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
-        { reference: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
-        { supplier: { businessName: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } } },
-        { supplier: { documentNumber: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } }} ,
-      ],
-    }
-
-    const [transactions, total] = await Promise.all([
-      this.prisma.transaction.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { transactionDate: "desc" },
-        include: {
-          bankAccount: {
-            select: {
-              id: true,
-              accountNumber: true,
-              alias: true,
-              bank: { select: { name: true, code: true } },
-            },
-          },
-          supplier: {
-            select: {
-              id: true,
-              businessName: true,
-              documentNumber: true,
-            },
-          },
-        },
-      }),
-      this.prisma.transaction.count({ where }),
-    ])
-
-    const totalPages = Math.ceil(total / limit)
-
-    return {
-      data: transactions,
-      total,
-      page,
-      limit,
-      totalPages,
-    }
-  }
-
-  async updateTransactionStatus(id: string, status: TransactionStatus): Promise<Transaction> {
-    const transaction = await this.prisma.transaction.findUnique({
-      where: { id },
-    })
-
-    if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${id} not found`)
-    }
-
-    return this.prisma.transaction.update({
-      where: { id },
-      data: { status, updatedAt: new Date() },
-    })
-  }
-
-  // Private helper methods
   private generateTransactionHash(data: {
     bankAccountId: string
     transactionDate: Date
-    amount: number
     description: string
+    amount: number
     operationNumber?: string
   }): string {
-    const hashString = `${data.bankAccountId}-${data.transactionDate.toISOString()}-${data.amount}-${data.description}-${data.operationNumber || ""}`
+    const hashString = `${data.bankAccountId}-${data.transactionDate.toISOString()}-${data.description}-${data.amount}-${data.operationNumber || ""}`
     return createHash("sha256").update(hashString).digest("hex")
-  }
-
-  private async updateBankAccountBalance(
-    bankAccountId: string,
-    amount: Prisma.Decimal,
-    transactionType: TransactionType,
-  ): Promise<void> {
-    const balanceChange = transactionType === "CREDIT" ? amount : amount.neg()
-
-    await this.prisma.bankAccount.update({
-      where: { id: bankAccountId },
-      data: {
-        currentBalance: {
-          increment: balanceChange,
-        },
-      },
-    })
   }
 }
