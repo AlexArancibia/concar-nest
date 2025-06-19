@@ -1,9 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common"
-import { PrismaService } from "../prisma/prisma.service"
-import { CreateTransactionDto } from "./dto/create-transaction.dto"
-import { UpdateTransactionDto } from "./dto/update-transaction.dto"
-import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import { Transaction, TransactionStatus } from "@prisma/client"
+import  { PrismaService } from "../prisma/prisma.service"
+import  { CreateTransactionDto } from "./dto/create-transaction.dto"
+import  { UpdateTransactionDto } from "./dto/update-transaction.dto"
+import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
+import  { Transaction, TransactionStatus } from "@prisma/client"
 import { createHash } from "crypto"
 
 @Injectable()
@@ -67,21 +67,42 @@ export class TransactionsService {
     }
 
     // Generate transaction hash for uniqueness
-    const transactionHash = this.generateTransactionHash({
+    const hashData = {
       bankAccountId,
       transactionDate: new Date(transactionDate),
       description,
       amount,
+      balance,
       operationNumber: otherFields.operationNumber,
-    })
+      operationTime: otherFields.operationTime,
+      utc: otherFields.utc,
+    }
+
+    console.log("🔍 DEBUG - Hash Data:", JSON.stringify(hashData, null, 2))
+
+    const transactionHash = this.generateTransactionHash(hashData)
+
+    console.log("🔑 DEBUG - Generated Hash:", transactionHash)
 
     // Check for duplicate transaction
     const existingTransaction = await this.prisma.transaction.findUnique({
       where: { transactionHash },
     })
+
     if (existingTransaction) {
-      throw new BadRequestException("Transaction already exists")
+      console.log("❌ DEBUG - Duplicate transaction found:", {
+        existingId: existingTransaction.id,
+        existingDate: existingTransaction.transactionDate,
+        existingDescription: existingTransaction.description,
+        existingAmount: existingTransaction.amount,
+        existingBalance: existingTransaction.balance,
+        existingOperationNumber: existingTransaction.operationNumber,
+        newHash: transactionHash,
+      })
+      throw new BadRequestException(`Transaction already exists with hash: ${transactionHash}`)
     }
+
+    console.log("✅ DEBUG - Creating new transaction with hash:", transactionHash)
 
     return this.prisma.transaction.create({
       data: {
@@ -120,13 +141,21 @@ export class TransactionsService {
 
     for (const [index, transactionData] of transactions.entries()) {
       try {
-        const transactionHash = this.generateTransactionHash({
+        const hashData = {
           bankAccountId,
           transactionDate: transactionData.transactionDate,
           description: transactionData.description,
           amount: transactionData.amount,
+          balance: transactionData.balance,
           operationNumber: transactionData.operationNumber,
-        })
+          operationTime: transactionData.operationTime,
+          utc: transactionData.utc,
+        }
+
+        const transactionHash = this.generateTransactionHash(hashData)
+
+        console.log(`🔍 DEBUG - Row ${index + 1} Hash Data:`, JSON.stringify(hashData, null, 2))
+        console.log(`🔑 DEBUG - Row ${index + 1} Generated Hash:`, transactionHash)
 
         // Check for duplicate
         const existing = await this.prisma.transaction.findUnique({
@@ -134,6 +163,7 @@ export class TransactionsService {
         })
 
         if (existing) {
+          console.log(`❌ DEBUG - Row ${index + 1} Duplicate found:`, existing.id)
           duplicates++
           continue
         }
@@ -149,8 +179,10 @@ export class TransactionsService {
           },
         })
 
+        console.log(`✅ DEBUG - Row ${index + 1} Created successfully`)
         imported++
       } catch (error) {
+        console.error(`❌ DEBUG - Row ${index + 1} Error:`, error.message)
         errors.push(`Row ${index + 1}: ${error.message}`)
       }
     }
@@ -276,9 +308,16 @@ export class TransactionsService {
     transactionDate: Date
     description: string
     amount: number
+    balance: number
     operationNumber?: string
+    operationTime?: string
+    utc?: string
   }): string {
-    const hashString = `${data.bankAccountId}-${data.transactionDate.toISOString()}-${data.description}-${data.amount}-${data.operationNumber || ""}`
-    return createHash("sha256").update(hashString).digest("hex")
+    const hashString = `${data.bankAccountId}-${data.transactionDate.toISOString()}-${data.description}-${data.amount}-${data.balance}-${data.operationNumber || ""}-${data.operationTime || ""}-${data.utc || ""}`
+
+    console.log("🔧 DEBUG - Hash String:", hashString)
+
+    const hash = createHash("sha256").update(hashString).digest("hex")
+    return hash
   }
 }
