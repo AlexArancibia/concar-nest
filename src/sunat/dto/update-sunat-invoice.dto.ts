@@ -20,11 +20,11 @@ export class UpdateSunatInvoiceDto {
 
   @IsOptional()
   @IsDateString()
-  issueDate?: Date
+  issueDate?: string
 
   @IsOptional()
   @IsDateString()
-  expirationDate?: Date
+  expirationDate?: string
 
   @IsOptional()
   @IsString()
@@ -120,7 +120,7 @@ export class UpdateSunatInvoiceDto {
 
   @IsOptional()
   @IsDateString()
-  modifiedIssueDate?: Date
+  modifiedIssueDate?: string
 
   @IsOptional()
   @IsString()

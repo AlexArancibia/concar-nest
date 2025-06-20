@@ -4,7 +4,7 @@ import { Type } from "class-transformer"
 export class UpdateSunatRheDto {
   @IsOptional()
   @IsDateString()
-  issueDate?: Date
+  issueDate?: string
 
   @IsOptional()
   @IsString()

@@ -3,7 +3,7 @@ import { Type } from "class-transformer"
 
 export class CreateSunatRheDto {
   @IsDateString()
-  issueDate: Date
+  issueDate: string
 
   @IsString()
   @IsNotEmpty()
