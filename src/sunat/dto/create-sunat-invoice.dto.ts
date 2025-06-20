@@ -19,11 +19,11 @@ export class CreateSunatInvoiceDto {
   name: string // Razón Social
 
   @IsDateString()
-  issueDate: Date // Fecha de emisión
+  issueDate: string // Fecha de emisión
 
   @IsOptional()
   @IsDateString()
-  expirationDate?: Date // Fecha de vencimiento/pago
+  expirationDate?: string // Fecha de vencimiento/pago
 
   @IsString()
   @IsNotEmpty()
@@ -116,7 +116,7 @@ export class CreateSunatInvoiceDto {
 
   @IsOptional()
   @IsDateString()
-  modifiedIssueDate?: Date // Fecha Emisión Doc Modificado
+  modifiedIssueDate?: string // Fecha Emisión Doc Modificado
 
   @IsOptional()
   @IsString()
