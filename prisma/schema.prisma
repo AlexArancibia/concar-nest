@@ -69,17 +69,29 @@ enum DocumentStatus {
 }
 
 enum TransactionType {
-  DEBIT
-  CREDIT
-  TRANSFER 
-  FEE 
-  INTEREST
-  DETRACTION 
-  ITF 
-  PAYMENT 
-  DEPOSIT 
-  WITHDRAWAL 
+  PAYROLL_SALARY        // Sueldos
+  PAYROLL_CTS           // CTS
+  PAYROLL_BONUS         // Gratificaciones o bonos
+  PAYROLL_AFP           // Aportes a AFP
+
+  TAX_PAYMENT           // SUNAT, IGV, Renta, etc.
+  TAX_ITF               // Impuesto a las transacciones financieras
+  TAX_DETRACTION        // Pagos de detracción
+
+  EXPENSE_UTILITIES     // Servicios como luz, agua, internet
+  EXPENSE_INSURANCE     // Seguros (ej. MAPFRE)
+  EXPENSE_COMMISSIONS   // Comisiones, mantenimiento, portes
+  EXPENSE_PURCHASE      // Pago a proveedores
+  EXPENSE_OTHER         // Egresos varios
+
+  TRANSFER_INBANK       // Transferencia dentro del mismo banco
+  TRANSFER_EXTERNAL     // Transferencia interbancaria (CCE, etc.)
+
+  WITHDRAWAL_CASH       // Retiro de efectivo
+  ADJUSTMENT            // Ajustes o regularizaciones
+  REFUND                 // Reembolso o devolución
 }
+
 
 enum TransactionStatus {
   PENDING
