@@ -4,18 +4,21 @@ import {
   NotFoundException,
   UnauthorizedException,
   InternalServerErrorException,
-} from "@nestjs/common"
-import  { PrismaService } from "../prisma/prisma.service"
-import  { JwtService } from "@nestjs/jwt"
-import  { CreateAuthDto } from "./dto/create-auth.dto"
-import  { UpdateUserDto } from "./dto/update-auth.dto"
-import  { LoginAuthDto } from "./dto/login-auth.dto"
-import * as bcrypt from "bcryptjs"
-import  { ConfigService } from "@nestjs/config"
-import { AuthProvider, UserRole } from "@prisma/client"
+  Logger,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { JwtService } from "@nestjs/jwt";
+import { CreateAuthDto } from "./dto/create-auth.dto";
+import { UpdateUserDto } from "./dto/update-auth.dto";
+import { LoginAuthDto } from "./dto/login-auth.dto";
+import * as bcrypt from "bcryptjs";
+import { ConfigService } from "@nestjs/config";
+import { AuthProvider, UserRole, Prisma } from "@prisma/client";
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -23,21 +26,19 @@ export class AuthService {
   ) {}
 
   async create(createUserDto: CreateAuthDto) {
-    console.log("🔐 Creating new user:", createUserDto.email)
+    this.logger.log(`Attempting to create new user: ${createUserDto.email}`);
 
-    // Verificar si el email ya existe
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
-    })
+    });
 
     if (existingUser) {
-      console.log("❌ Email already exists:", createUserDto.email)
-      throw new ConflictException("Email already exists")
+      this.logger.warn(`Email already exists: ${createUserDto.email}`);
+      throw new ConflictException("Email already exists");
     }
 
-    // Hashear la contraseña
-    const hashedPassword = await bcrypt.hash(createUserDto.password, 10)
-    console.log("🔒 Password hashed successfully")
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    this.logger.log("Password hashed successfully");
 
     try {
       const user = await this.prisma.user.create({
@@ -53,162 +54,141 @@ export class AuthService {
           authProvider: createUserDto.authProvider || AuthProvider.EMAIL,
           companyId: createUserDto.companyId,
           isActive: true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
         },
         include: {
-          company: true, // Include company data
+          company: true,
         },
-      })
+      });
 
-      // Remove password from response
-      const { password, company, ...userWithoutPasswordAndCompany } = user
+      const { password, company, ...userWithoutPasswordAndCompany } = user;
+      this.logger.log(`User created successfully: ${user.id}`);
 
-      console.log("✅ User created successfully:", user.id)
-
-      // Generar token para auto-login después del registro
       const payload = {
         id: user.id,
         email: user.email,
         role: user.role,
-      }
+      };
 
       const access_token = await this.jwtService.signAsync(payload, {
         secret: this.configService.get<string>("JWT_SECRET"),
         expiresIn: "5d",
-      })
-
-      console.log("🔑 Access token generated for new user")
+      });
+      this.logger.log(`Access token generated for new user: ${user.id}`);
 
       return {
         access_token,
         userInfo: userWithoutPasswordAndCompany,
-        company: company || null, // Return single company
-      }
+        company: company || null,
+      };
     } catch (error) {
-      console.error("❌ Error creating user:", error)
-      throw new InternalServerErrorException("Error creating user: " + error.message)
+      this.logger.error(`Error creating user: ${createUserDto.email}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        // Handle known Prisma errors, e.g., unique constraint violation if not caught by findUnique
+        throw new ConflictException("Could not create user due to a database conflict.");
+      }
+      throw new InternalServerErrorException("An unexpected error occurred while creating the user.");
     }
   }
 
   async login(loginUserDto: LoginAuthDto) {
-    console.log("🔐 Login attempt for:", loginUserDto.email)
+    this.logger.log(`Login attempt for: ${loginUserDto.email}`);
+    const user = await this.prisma.user.findUnique({
+      where: { email: loginUserDto.email },
+      include: {
+        company: true,
+      },
+    });
 
-    try {
-      const user = await this.prisma.user.findUnique({
-        where: { email: loginUserDto.email },
-        include: {
-          company: true, // Include company data
-        },
-      })
+    if (!user) {
+      this.logger.warn(`Login failed: User not found - ${loginUserDto.email}`);
+      throw new UnauthorizedException("Invalid credentials");
+    }
 
-      if (!user) {
-        console.log("❌ User not found:", loginUserDto.email)
-        throw new UnauthorizedException("Invalid credentials")
-      }
+    if (!user.isActive) {
+      this.logger.warn(`Login failed: Account inactive - ${loginUserDto.email}`);
+      throw new UnauthorizedException("Account is inactive");
+    }
 
-      if (!user.isActive) {
-        console.log("❌ User account is inactive:", loginUserDto.email)
-        throw new UnauthorizedException("Account is inactive")
-      }
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      this.logger.warn(`Login failed: Account locked - ${loginUserDto.email}`);
+      throw new UnauthorizedException("Account is temporarily locked");
+    }
 
-      // Verificar si la cuenta está bloqueada
-      if (user.lockedUntil && user.lockedUntil > new Date()) {
-        console.log("❌ Account is locked:", loginUserDto.email)
-        throw new UnauthorizedException("Account is temporarily locked")
-      }
+    const isPasswordMatch = await bcrypt.compare(loginUserDto.password, user.password);
 
-      const isPasswordMatch = await bcrypt.compare(loginUserDto.password, user.password)
-
-      if (!isPasswordMatch) {
-        console.log("❌ Invalid password for:", loginUserDto.email)
-
-        // Incrementar intentos fallidos
-        await this.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            failedLoginAttempts: user.failedLoginAttempts + 1,
-            // Bloquear cuenta después de 5 intentos fallidos por 30 minutos
-            lockedUntil: user.failedLoginAttempts >= 4 ? new Date(Date.now() + 30 * 60 * 1000) : null,
-          },
-        })
-
-        throw new UnauthorizedException("Invalid credentials")
-      }
-
-      // Resetear intentos fallidos y actualizar lastLogin
+    if (!isPasswordMatch) {
+      this.logger.warn(`Login failed: Invalid password - ${loginUserDto.email}`);
       await this.prisma.user.update({
         where: { id: user.id },
         data: {
-          lastLogin: new Date(),
-          failedLoginAttempts: 0,
-          lockedUntil: null,
-          updatedAt: new Date(),
+          failedLoginAttempts: user.failedLoginAttempts + 1,
+          lockedUntil: user.failedLoginAttempts >= 4 ? new Date(Date.now() + 30 * 60 * 1000) : null,
         },
-      })
-
-      console.log("✅ Login successful for:", user.email)
-
-      // Extraer password y company del objeto user
-      const { password, company, ...userWithoutPasswordAndCompany } = user
-
-      // Crear payload para el token
-      const payload = {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-      }
-
-      const access_token = await this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>("JWT_SECRET"),
-        expiresIn: "5d",
-      })
-
-      console.log("🔑 Access token generated for:", user.email)
-
-      return {
-        access_token,
-        userInfo: userWithoutPasswordAndCompany,
-        company: company || null, // Return single company, not array
-      }
-    } catch (error) {
-      if (error instanceof UnauthorizedException) {
-        throw error
-      }
-      console.error("❌ Error during login:", error)
-      throw new InternalServerErrorException("Error during login: " + error.message)
+      });
+      throw new UnauthorizedException("Invalid credentials");
     }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLogin: new Date(),
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+    this.logger.log(`Login successful for: ${user.email}`);
+
+    const { password, company, ...userWithoutPasswordAndCompany } = user;
+    const payload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
+    const access_token = await this.jwtService.signAsync(payload, {
+      secret: this.configService.get<string>("JWT_SECRET"),
+      expiresIn: "5d",
+    });
+    this.logger.log(`Access token generated for: ${user.email}`);
+
+    return {
+      access_token,
+      userInfo: userWithoutPasswordAndCompany,
+      company: company || null,
+    };
   }
 
   async findAll() {
-    console.log("📋 Fetching all users")
-
-    return this.prisma.user.findMany({
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        image: true,
-        phone: true,
-        bio: true,
-        emailVerified: true,
-        lastLogin: true,
-        isActive: true,
-        companyId: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    })
+    this.logger.log("Fetching all users");
+    try {
+      return await this.prisma.user.findMany({
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          image: true,
+          phone: true,
+          bio: true,
+          emailVerified: true,
+          lastLogin: true,
+          isActive: true,
+          companyId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+    } catch (error) {
+      this.logger.error("Error fetching all users", error.stack);
+      throw new InternalServerErrorException("Failed to retrieve users.");
+    }
   }
 
   async findOne(id: string) {
-    console.log("👤 Fetching user:", id)
-
+    this.logger.log(`Fetching user with ID: ${id}`);
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -231,74 +211,61 @@ export class AuthService {
         failedLoginAttempts: true,
         lockedUntil: true,
       },
-    })
+    });
 
     if (!user) {
-      console.log("❌ User not found:", id)
-      throw new NotFoundException(`User with ID ${id} not found`)
+      this.logger.warn(`User not found with ID: ${id}`);
+      throw new NotFoundException(`User with ID ${id} not found`);
     }
-
-    console.log("✅ User found:", user.email)
-    return user
+    this.logger.log(`User found: ${user.email}`);
+    return user;
   }
 
   async update(id: string, updateUserDto: UpdateUserDto) {
-    console.log("📝 Updating user:", id)
-
-    // Verificar que el usuario existe
+    this.logger.log(`Attempting to update user: ${id}`);
     const existingUser = await this.prisma.user.findUnique({
       where: { id },
       select: { id: true, password: true, email: true },
-    })
+    });
 
     if (!existingUser) {
-      console.log("❌ User not found for update:", id)
-      throw new NotFoundException(`User with ID ${id} not found`)
+      this.logger.warn(`User not found for update: ${id}`);
+      throw new NotFoundException(`User with ID ${id} not found`);
     }
 
-    // Manejar cambio de contraseña
     if (updateUserDto.newPassword && updateUserDto.password) {
-      console.log("🔐 Changing password for user:", id)
-
-      const isPasswordMatch = await bcrypt.compare(updateUserDto.password, existingUser.password)
-
+      this.logger.log(`Changing password for user: ${id}`);
+      const isPasswordMatch = await bcrypt.compare(updateUserDto.password, existingUser.password);
       if (!isPasswordMatch) {
-        console.log("❌ Current password is incorrect for user:", id)
-        throw new UnauthorizedException("Current password is incorrect")
+        this.logger.warn(`Current password incorrect for user: ${id}`);
+        throw new UnauthorizedException("Current password is incorrect");
       }
-
-      // Actualizar a la nueva contraseña
-      updateUserDto.password = await bcrypt.hash(updateUserDto.newPassword, 10)
-      delete updateUserDto.newPassword
-      console.log("✅ Password updated successfully")
-    } else if (updateUserDto.password) {
-      // Si solo se proporciona password (sin verificación)
-      updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10)
-      console.log("🔐 Password hashed for update")
+      updateUserDto.password = await bcrypt.hash(updateUserDto.newPassword, 10);
+      delete updateUserDto.newPassword; // Remove newPassword from DTO after hashing
+      this.logger.log("Password updated successfully");
+    } else if (updateUserDto.password && !updateUserDto.newPassword) {
+      // If only password is provided, it implies setting a new password without current one (e.g. admin reset)
+      // This logic might need adjustment based on actual requirements for password updates.
+      // For now, let's assume it's an admin-like direct password update.
+      this.logger.log(`Password being reset for user: ${id}`);
+      updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10);
     }
 
-    // Verificar email único si se está actualizando
+
     if (updateUserDto.email && updateUserDto.email !== existingUser.email) {
       const emailExists = await this.prisma.user.findUnique({
         where: { email: updateUserDto.email },
-      })
-
+      });
       if (emailExists) {
-        console.log("❌ Email already exists:", updateUserDto.email)
-        throw new ConflictException("Email already exists")
+        this.logger.warn(`Email already exists: ${updateUserDto.email}`);
+        throw new ConflictException("Email already exists");
       }
-    }
-
-    // Siempre actualizar updatedAt
-    const updateData = {
-      ...updateUserDto,
-      updatedAt: new Date(),
     }
 
     try {
       const updatedUser = await this.prisma.user.update({
         where: { id },
-        data: updateData,
+        data: { ...updateUserDto, updatedAt: new Date() }, // Ensure updatedAt is always set
         select: {
           id: true,
           email: true,
@@ -316,52 +283,52 @@ export class AuthService {
           updatedAt: true,
           preferences: true,
         },
-      })
-
-      console.log("✅ User updated successfully:", updatedUser.email)
-      return updatedUser
+      });
+      this.logger.log(`User updated successfully: ${updatedUser.email}`);
+      return updatedUser;
     } catch (error) {
-      if (error.code === "P2025") {
-        throw new NotFoundException(`User with ID ${id} not found`)
+      this.logger.error(`Error updating user: ${id}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`User with ID ${id} not found for update.`);
       }
-      console.error("❌ Error updating user:", error)
-      throw new InternalServerErrorException("Error updating user: " + error.message)
+      throw new InternalServerErrorException("An unexpected error occurred while updating the user.");
     }
   }
 
   async remove(id: string) {
-    console.log("🗑️ Removing user:", id)
+    this.logger.log(`Attempting to remove user: ${id}`);
+    // First, check if user exists to throw NotFoundException if applicable
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true }, // Select minimal fields
+    });
+
+    if (!user) {
+      this.logger.warn(`User not found for deletion: ${id}`);
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
 
     try {
-      // Verificar que el usuario existe antes de eliminar
-      const user = await this.prisma.user.findUnique({
-        where: { id },
-        select: { id: true, email: true },
-      })
-
-      if (!user) {
-        console.log("❌ User not found for deletion:", id)
-        throw new NotFoundException(`User with ID ${id} not found`)
-      }
-
       await this.prisma.user.delete({
         where: { id },
-      })
-
-      console.log("✅ User deleted successfully:", user.email)
-      return { message: "User deleted successfully" }
+      });
+      this.logger.log(`User deleted successfully: ${user.email}`);
+      return { message: "User deleted successfully" };
     } catch (error) {
-      if (error.code === "P2025") {
-        throw new NotFoundException(`User with ID ${id} not found`)
+      this.logger.error(`Error deleting user: ${id}`, error.stack);
+      // P2025 is "Record to delete does not exist", but we already checked.
+      // Other Prisma errors could occur, e.g., foreign key constraints.
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+         if (error.code === 'P2003') { // Foreign key constraint failed
+          throw new ConflictException(`Cannot delete user with ID ${id} due to existing related records.`);
+        }
       }
-      console.error("❌ Error deleting user:", error)
-      throw new InternalServerErrorException("Error deleting user: " + error.message)
+      throw new InternalServerErrorException("An unexpected error occurred while deleting the user.");
     }
   }
 
   async verifyEmail(id: string) {
-    console.log("📧 Verifying email for user:", id)
-
+    this.logger.log(`Verifying email for user: ${id}`);
     try {
       const updatedUser = await this.prisma.user.update({
         where: { id },
@@ -374,54 +341,61 @@ export class AuthService {
           email: true,
           emailVerified: true,
         },
-      })
-
-      console.log("✅ Email verified successfully for:", updatedUser.email)
-      return { message: "Email verified successfully" }
+      });
+      this.logger.log(`Email verified successfully for: ${updatedUser.email}`);
+      return { message: "Email verified successfully" };
     } catch (error) {
-      if (error.code === "P2025") {
-        console.log("❌ User not found for email verification:", id)
-        throw new NotFoundException(`User with ID ${id} not found`)
+      this.logger.error(`Error verifying email for user: ${id}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`User with ID ${id} not found for email verification.`);
       }
-      console.error("❌ Error verifying email:", error)
-      throw new InternalServerErrorException("Error verifying email: " + error.message)
+      throw new InternalServerErrorException("An unexpected error occurred while verifying the email.");
     }
   }
 
-  // Método adicional para obtener empresas del usuario (para implementar después)
   async getUserCompanies(userId: string) {
-    console.log("🏢 Fetching companies for user:", userId)
-
-    // TODO: Implementar cuando se tenga la relación usuario-empresa
-    // Por ahora retorna array vacío
-    return { companies: [] }
+    this.logger.log(`Fetching companies for user: ${userId}`);
+    // TODO: Implement proper logic when user-company relation is defined
+    return { companies: [] };
   }
 
-  // Método para cambiar empresa seleccionada
   async selectCompany(userId: string, companyId: string) {
-    console.log("🏢 Selecting company for user:", userId, "company:", companyId)
-
+    this.logger.log(`Selecting company for user: ${userId}, company: ${companyId}`);
     try {
-      const updatedUser = await this.prisma.user.update({
+      // First, ensure the user exists
+      const userExists = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+      if (!userExists) {
+        throw new NotFoundException(`User with ID ${userId} not found.`);
+      }
+      // Optionally, ensure the company exists
+      const companyExists = await this.prisma.company.findUnique({ where: { id: companyId }, select: { id: true } });
+      if (!companyExists) {
+        throw new NotFoundException(`Company with ID ${companyId} not found.`);
+      }
+
+      await this.prisma.user.update({
         where: { id: userId },
         data: {
           companyId: companyId,
           updatedAt: new Date(),
         },
-        select: {
+        select: { // Select minimal fields, or what's needed by the client
           id: true,
           companyId: true,
         },
-      })
-
-      console.log("✅ Company selected successfully")
-      return { message: "Company selected successfully" }
+      });
+      this.logger.log("Company selected successfully");
+      return { message: "Company selected successfully" };
     } catch (error) {
-      if (error.code === "P2025") {
-        throw new NotFoundException(`User with ID ${userId} not found`)
+      this.logger.error(`Error selecting company for user: ${userId}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        // This might be redundant if we check existence first, but good as a fallback.
+        throw new NotFoundException(`User or Company not found during company selection.`);
       }
-      console.error("❌ Error selecting company:", error)
-      throw new InternalServerErrorException("Error selecting company: " + error.message)
+       if (error instanceof NotFoundException) { // Re-throw if it's our explicit NotFoundException
+        throw error;
+      }
+      throw new InternalServerErrorException("An unexpected error occurred while selecting the company.");
     }
   }
 }
