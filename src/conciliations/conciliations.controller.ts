@@ -25,10 +25,13 @@ import { ConciliationFiltersDto } from "./dto/conciliation-filters.dto";
 import { ValidateConciliationDto } from "./dto/validate-conciliation.dto";
 import { ApiResponse } from "src/common/interfaces/api-response.interface";
 import { Conciliation, ConciliationItem, ConciliationExpense } from "@prisma/client"; // Assuming these types exist
+import { AutomaticConciliationResultDto } from "./dto/automatic-conciliation-result.dto";
+import { ValidateConciliationResultDto } from "./dto/validate-conciliation-result.dto";
 
 // Define more specific types if available from DTOs or service responses
 type ConciliationDetails = Conciliation & { items: ConciliationItem[], expenses: ConciliationExpense[] }; // Example
-type ValidationResult = any; // Replace with actual type
+type ValidationResult = ValidateConciliationResultDto;
+type AutoConciliationResult = AutomaticConciliationResultDto;
 type StatisticsResult = any; // Replace with actual type
 type ExportResult = any; // Replace with actual type, could be a file stream or URL
 type PendingDocumentResult = any; // Replace with actual type
@@ -145,7 +148,7 @@ export class ConciliationsController {
 
   @Post(":id/auto-conciliate")
   @HttpCode(HttpStatus.OK)
-  async performAutomaticConciliation(@Param("id") id: string): Promise<ApiResponse<Conciliation>> {
+  async performAutomaticConciliation(@Param("id") id: string): Promise<ApiResponse<AutoConciliationResult>> {
     if (!id) {
       throw new BadRequestException("Conciliation ID is required");
     }
