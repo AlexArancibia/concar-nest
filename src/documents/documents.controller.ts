@@ -15,7 +15,7 @@ import { AuthGuard } from "src/auth/guards/auth.guard";
 import { DocumentsService } from "./documents.service";
 import { CreateDocumentDto } from "./dto/create-document.dto";
 import { UpdateDocumentDto, UpdateDocumentStatusDto, ConciliateDocumentDto } from "./dto/update-document.dto";
-import { DocumentFiltersDto } from "./dto/document-filters.dto";
+import { DocumentQueryDto } from "./dto/document-filters.dto";
 import { DocumentStatus } from "@prisma/client";
 import { ApiResponse } from "src/common/interfaces/api-response.interface";
 import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto";
@@ -37,7 +37,7 @@ export class DocumentsController {
   @HttpCode(HttpStatus.OK)
   async fetchDocuments(
     @Param('companyId') companyId: string,
-    @Query() filters: DocumentFiltersDto,
+    @Query() filters: DocumentQueryDto,
   ): Promise<ApiResponse<PaginatedDocumentsResponse>> {
     const data = await this.documentsService.fetchDocuments(companyId, filters);
     return {
@@ -119,7 +119,7 @@ export class DocumentsController {
   async getDocumentsBySupplier(
     @Param('companyId') companyId: string,
     @Param('supplierId') supplierId: string,
-    @Query() filters: DocumentFiltersDto,
+    @Query() filters: DocumentQueryDto,
   ): Promise<ApiResponse<PaginatedDocumentsResponse>> {
     const data = await this.documentsService.getDocumentsBySupplier(companyId, supplierId, filters);
     return {

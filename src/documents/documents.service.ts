@@ -3,9 +3,42 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateDocumentDto } from "./dto/create-document.dto";
 import { UpdateDocumentDto, ConciliateDocumentDto } from "./dto/update-document.dto";
-import { DocumentFiltersDto } from "./dto/document-filters.dto";
+import { DocumentQueryDto } from "./dto/document-filters.dto";
 import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto";
-import { DocumentStatus, Prisma as PrismaType } from "@prisma/client";
+import {
+  DocumentStatus,
+  Prisma as PrismaType,
+  Document,
+  Supplier,
+  DocumentLine,
+  DocumentLineAccountLink,
+  Account,
+  DocumentLineCostCenterLink,
+  CostCenter,
+  DocumentPaymentTerm,
+  DocumentAccountLink,
+  DocumentCostCenterLink,
+  DocumentXmlData,
+  DocumentDigitalSignature,
+  DocumentDetraction
+} from "@prisma/client";
+
+// Define a more specific type for the document with all its relations
+type FullDocumentLine = DocumentLine & {
+  accountLinks: (DocumentLineAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[];
+  costCenterLinks: (DocumentLineCostCenterLink & { costCenter: Pick<CostCenter, 'id' | 'code' | 'name'> })[];
+};
+
+type FullDocument = Document & {
+  supplier: Pick<Supplier, 'id' | 'businessName' | 'documentNumber' | 'documentType'> | null;
+  lines: FullDocumentLine[];
+  paymentTerms: DocumentPaymentTerm[];
+  accountLinks: (DocumentAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[];
+  costCenterLinks: (DocumentCostCenterLink & { costCenter: Pick<CostCenter, 'id' | 'code' | 'name'> })[];
+  xmlData: DocumentXmlData | null;
+  digitalSignature: DocumentDigitalSignature | null;
+  detraction: DocumentDetraction | null;
+};
 
 @Injectable()
 export class DocumentsService {
@@ -742,7 +775,7 @@ export class DocumentsService {
     };
   }
 
-  private mapToResponseDto(document: any): DocumentResponseDto {
+  private mapToResponseDto(document: FullDocument): DocumentResponseDto {
     // This mapping logic remains the same.
     // Ensure all properties are correctly typed if 'any' is used.
     return {
@@ -758,17 +791,17 @@ export class DocumentsService {
       dueDate: document.dueDate,
       receptionDate: document.receptionDate,
       currency: document.currency,
-      exchangeRate: document.exchangeRate,
-      subtotal: document.subtotal,
-      igv: document.igv,
-      otherTaxes: document.otherTaxes,
-      total: document.total,
+      exchangeRate: document.exchangeRate, // Assuming this is already number or needs to be
+      subtotal: document.subtotal.toNumber(),
+      igv: document.igv.toNumber(),
+      otherTaxes: document.otherTaxes?.toNumber() || 0, // Assuming otherTaxes can be null
+      total: document.total.toNumber(),
       hasRetention: document.hasRetention,
-      retentionAmount: document.retentionAmount,
-      retentionPercentage: document.retentionPercentage,
-      netPayableAmount: document.netPayableAmount,
-      conciliatedAmount: document.conciliatedAmount,
-      pendingAmount: document.pendingAmount,
+      retentionAmount: document.retentionAmount.toNumber(),
+      retentionPercentage: document.retentionPercentage, // Assuming this is already number
+      netPayableAmount: document.netPayableAmount.toNumber(),
+      conciliatedAmount: document.conciliatedAmount.toNumber(),
+      pendingAmount: document.pendingAmount.toNumber(),
       paymentMethod: document.paymentMethod,
       description: document.description,
       observations: document.observations,
@@ -784,13 +817,53 @@ export class DocumentsService {
       createdById: document.createdById,
       updatedById: document.updatedById,
       supplier: document.supplier,
-      lines: document.lines,
-      paymentTerms: document.paymentTerms,
-      accountLinks: document.accountLinks,
-      costCenterLinks: document.costCenterLinks,
-      xmlData: document.xmlData,
-      digitalSignature: document.digitalSignature,
-      detraction: document.detraction,
+      lines: document.lines.map(line => ({
+        ...line,
+        quantity: line.quantity.toNumber(),
+        unitPrice: line.unitPrice.toNumber(),
+        unitPriceWithTax: line.unitPriceWithTax.toNumber(),
+        lineTotal: line.lineTotal.toNumber(),
+        igvAmount: line.igvAmount.toNumber(),
+        referencePrice: line.referencePrice?.toNumber(),
+        allowanceAmount: line.allowanceAmount?.toNumber() || 0,
+        chargeAmount: line.chargeAmount?.toNumber() || 0,
+        taxableAmount: line.taxableAmount.toNumber(),
+        exemptAmount: line.exemptAmount.toNumber(),
+        inaffectedAmount: line.inaffectedAmount.toNumber(),
+        accountLinks: line.accountLinks.map(al => ({
+          ...al,
+          amount: al.amount.toNumber(),
+          // account is already selected with correct fields
+        })),
+        costCenterLinks: line.costCenterLinks.map(ccl => ({
+          ...ccl,
+          amount: ccl.amount.toNumber(),
+          // costCenter is already selected with correct fields
+        })),
+      })),
+      paymentTerms: document.paymentTerms.map(pt => ({
+        ...pt,
+        amount: pt.amount.toNumber(),
+      })),
+      accountLinks: document.accountLinks.map(al => ({
+        ...al,
+        amount: al.amount.toNumber(),
+        // account is already selected with correct fields
+      })),
+      costCenterLinks: document.costCenterLinks.map(ccl => ({
+        ...ccl,
+        amount: ccl.amount.toNumber(),
+        // costCenter is already selected with correct fields
+      })),
+      xmlData: document.xmlData, // Assuming DTO matches Prisma or is handled
+      digitalSignature: document.digitalSignature, // Assuming DTO matches Prisma or is handled
+      detraction: document.detraction ? {
+        ...document.detraction,
+        amount: document.detraction.amount.toNumber(),
+        percentage: document.detraction.percentage, // Assuming this is number
+        conciliatedAmount: document.detraction.conciliatedAmount.toNumber(),
+        pendingAmount: document.detraction.pendingAmount.toNumber(),
+      } : null,
     };
   }
 }
