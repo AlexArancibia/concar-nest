@@ -51,15 +51,19 @@ export class ExpensesService {
 
   async createExpense(expenseDto: CreateExpenseDto): Promise<Expense> { // Changed 'any' to CreateExpenseDto
     this.logger.log(`Creating expense for company ${expenseDto.companyId}`);
+    // Destructure to remove currency if it's causing issues, assuming currencyId might be in expenseDto
+    const { currency, ...restOfExpenseDto } = expenseDto;
+
     const expenseData = {
-      ...expenseDto,
-      transactionDate: new Date(expenseDto.transactionDate), // Ensure date conversion
+      ...restOfExpenseDto, // Spread the rest of the DTO
+      transactionDate: new Date(expenseDto.transactionDate), // Ensure date conversion (use original expenseDto for safety here)
       valueDate: expenseDto.valueDate ? new Date(expenseDto.valueDate) : null,
       documentDate: expenseDto.documentDate ? new Date(expenseDto.documentDate) : null,
       issueDate: expenseDto.issueDate ? new Date(expenseDto.issueDate) : null,
       dueDate: expenseDto.dueDate ? new Date(expenseDto.dueDate) : null,
       status: expenseDto.status || ExpenseStatus.IMPORTED,
       // Ensure other fields like rowHash, importedAt are handled correctly if part of DTO or set by default
+      // If currencyId is in expenseDto, it will be included via ...restOfExpenseDto
     };
 
     try {
