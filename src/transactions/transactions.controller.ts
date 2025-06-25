@@ -12,14 +12,14 @@ import {
   UseGuards,
   UploadedFile,
   UseInterceptors,
-} from "@nestjs/common"
-import { FileInterceptor } from "@nestjs/platform-express"
-import { AuthGuard } from "src/auth/guards/auth.guard"
-import { TransactionsService } from "./transactions.service"
-import { CreateTransactionDto } from "./dto/create-transaction.dto"
-import { UpdateTransactionDto } from "./dto/update-transaction.dto"
-import { PaginationDto } from "../common/dto/pagination.dto"
-import { TransactionStatus } from "@prisma/client"
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { AuthGuard } from "src/auth/guards/auth.guard";
+import { TransactionsService } from "./transactions.service";
+import { CreateTransactionDto } from "./dto/create-transaction.dto";
+import { UpdateTransactionDto } from "./dto/update-transaction.dto";
+import { TransactionStatus } from "@prisma/client";
+import { TransactionFiltersDto } from "./dto/transaction-filters.dto";
 
 @UseGuards(AuthGuard)
 @Controller("transactions")
@@ -27,8 +27,8 @@ export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
   @Get("company/:companyId")
-  async fetchTransactions(@Param("companyId") companyId: string, @Query() pagination: PaginationDto) {
-    return this.transactionsService.fetchTransactions(companyId, pagination)
+  async fetchTransactions(@Param("companyId") companyId: string, @Query() filters: TransactionFiltersDto) {
+    return this.transactionsService.fetchTransactions(companyId, filters);
   }
 
   @Post()
