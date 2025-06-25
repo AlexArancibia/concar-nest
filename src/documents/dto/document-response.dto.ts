@@ -1,17 +1,6 @@
 import { DocumentType, DocumentStatus } from "@prisma/client"
 
-export class DocumentLineAccountLinkResponseDto {
-  id: string
-  accountId: string
-  percentage: number
-  amount: number
-  createdAt: Date
-  account?: {
-    id: string
-    accountCode: string
-    accountName: string
-  }
-}
+// Removed DocumentLineAccountLinkResponseDto
 
 export class DocumentLineCostCenterLinkResponseDto {
   id: string
@@ -56,7 +45,7 @@ export class DocumentLineResponseDto {
   xmlLineData?: string
   createdAt: Date
   updatedAt: Date
-  accountLinks?: DocumentLineAccountLinkResponseDto[]
+  // accountLinks?: DocumentLineAccountLinkResponseDto[] // Removed
   costCenterLinks?: DocumentLineCostCenterLinkResponseDto[]
 }
 
@@ -70,18 +59,7 @@ export class DocumentPaymentTermResponseDto {
   updatedAt: Date
 }
 
-export class DocumentAccountLinkResponseDto {
-  id: string
-  accountId: string
-  percentage: number
-  amount: number
-  createdAt: Date
-  account?: {
-    id: string
-    accountCode: string
-    accountName: string
-  }
-}
+// Removed DocumentAccountLinkResponseDto
 
 export class DocumentCostCenterLinkResponseDto {
   id: string
@@ -198,7 +176,7 @@ export class DocumentResponseDto {
 
   lines?: DocumentLineResponseDto[]
   paymentTerms?: DocumentPaymentTermResponseDto[]
-  accountLinks?: DocumentAccountLinkResponseDto[]
+  // accountLinks?: DocumentAccountLinkResponseDto[] // Removed
   costCenterLinks?: DocumentCostCenterLinkResponseDto[]
   xmlData?: DocumentXmlDataResponseDto
   digitalSignature?: DocumentDigitalSignatureResponseDto

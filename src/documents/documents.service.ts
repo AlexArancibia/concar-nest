@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateDocumentDto } from "./dto/create-document.dto";
 import { UpdateDocumentDto, ConciliateDocumentDto } from "./dto/update-document.dto";
-import { DocumentQueryDto } from "./dto/document-filters.dto";
+import { DocumentQueryDto } from "./dto/document-filters.dto"; // Correctly aliased if DocumentFiltersDto is the intended name in this file
 import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto";
 import {
   DocumentStatus,
@@ -11,12 +11,12 @@ import {
   Document,
   Supplier,
   DocumentLine,
-  DocumentLineAccountLink,
-  Account,
+  // DocumentLineAccountLink, // Removed
+  // Account, // Removed
   DocumentLineCostCenterLink,
   CostCenter,
   DocumentPaymentTerm,
-  DocumentAccountLink,
+  // DocumentAccountLink, // Removed
   DocumentCostCenterLink,
   DocumentXmlData,
   DocumentDigitalSignature,
@@ -25,7 +25,7 @@ import {
 
 // Define a more specific type for the document with all its relations
 type FullDocumentLine = DocumentLine & {
-  accountLinks: (DocumentLineAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[];
+  // accountLinks: (DocumentLineAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[]; // Removed
   costCenterLinks: (DocumentLineCostCenterLink & { costCenter: Pick<CostCenter, 'id' | 'code' | 'name'> })[];
 };
 
@@ -33,7 +33,7 @@ type FullDocument = Document & {
   supplier: Pick<Supplier, 'id' | 'businessName' | 'documentNumber' | 'documentType'> | null;
   lines: FullDocumentLine[];
   paymentTerms: DocumentPaymentTerm[];
-  accountLinks: (DocumentAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[];
+  // accountLinks: (DocumentAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[]; // Removed
   costCenterLinks: (DocumentCostCenterLink & { costCenter: Pick<CostCenter, 'id' | 'code' | 'name'> })[];
   xmlData: DocumentXmlData | null;
   digitalSignature: DocumentDigitalSignature | null;
@@ -52,7 +52,7 @@ export class DocumentsService {
     const {
       lines,
       paymentTerms,
-      accountLinks,
+      // accountLinks, // Removed
       costCenterLinks,
       xmlData,
       digitalSignature,
@@ -113,15 +113,11 @@ export class DocumentsService {
           this.logger.log(`Creating ${lines.length} document lines for ${document.id}...`);
           for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            const { accountLinks: lineAccountLinks, costCenterLinks: lineCostCenterLinks, ...lineData } = line;
+            const { /* accountLinks: lineAccountLinks, */ costCenterLinks: lineCostCenterLinks, ...lineData } = line; // Removed lineAccountLinks
             const createdLine = await tx.documentLine.create({
               data: { ...lineData, documentId: document.id, lineNumber: i + 1 },
             });
-            if (lineAccountLinks && lineAccountLinks.length > 0) {
-              await tx.documentLineAccountLink.createMany({
-                data: lineAccountLinks.map((link) => ({ ...link, documentLineId: createdLine.id })),
-              });
-            }
+            // Removed block for lineAccountLinks
             if (lineCostCenterLinks && lineCostCenterLinks.length > 0) {
               await tx.documentLineCostCenterLink.createMany({
                 data: lineCostCenterLinks.map((link) => ({ ...link, documentLineId: createdLine.id })),
@@ -140,12 +136,8 @@ export class DocumentsService {
             })),
           });
         }
-        // ... (similar createMany for accountLinks, costCenterLinks, xmlData, digitalSignature, detraction if they exist) ...
-        if (accountLinks && accountLinks.length > 0) {
-             await tx.documentAccountLink.createMany({
-                data: accountLinks.map(link => ({ ...link, documentId: document.id }))
-            });
-        }
+        // ... (similar createMany for costCenterLinks, xmlData, digitalSignature, detraction if they exist) ...
+        // Removed block for accountLinks
         if (costCenterLinks && costCenterLinks.length > 0) {
             await tx.documentCostCenterLink.createMany({
                 data: costCenterLinks.map(link => ({ ...link, documentId: document.id }))
@@ -197,7 +189,7 @@ export class DocumentsService {
     }
   }
 
-  async fetchDocuments(companyId: string, filters: DocumentFiltersDto) {
+  async fetchDocuments(companyId: string, filters: DocumentQueryDto) {
     this.logger.log(`Fetching documents for company ${companyId} with filters: ${JSON.stringify(filters)}`);
     const {
       page = 1,
@@ -218,7 +210,7 @@ export class DocumentsService {
       hasDetraction,
       hasXmlData,
       hasDigitalSignature,
-      accountId,
+      // accountId, // Removed
       costCenterId,
     } = filters;
 
@@ -242,9 +234,7 @@ export class DocumentsService {
       ...(hasDigitalSignature !== undefined && {
         digitalSignature: hasDigitalSignature ? { isNot: null } : { is: null },
       }),
-      ...(accountId && {
-        OR: [{ accountLinks: { some: { accountId } } }, { lines: { some: { accountLinks: { some: { accountId } } } } }],
-      }),
+      // Removed accountId filter block
       ...(costCenterId && {
         OR: [
           { costCenterLinks: { some: { costCenterId } } },
@@ -332,7 +322,7 @@ export class DocumentsService {
     const {
       lines,
       paymentTerms,
-      accountLinks,
+      // accountLinks, // Removed
       costCenterLinks,
       xmlData,
       digitalSignature,
@@ -365,20 +355,16 @@ export class DocumentsService {
 
         // ... (Logic for updating lines, paymentTerms, etc. as in original, with logging)
         if (lines) {
-            await tx.documentLineAccountLink.deleteMany({ where: { documentLine: { documentId: id } } });
+            // await tx.documentLineAccountLink.deleteMany({ where: { documentLine: { documentId: id } } }); // Removed
             await tx.documentLineCostCenterLink.deleteMany({ where: { documentLine: { documentId: id } } });
             await tx.documentLine.deleteMany({ where: { documentId: id } });
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                const { accountLinks: lineAccountLinks, costCenterLinks: lineCostCenterLinks, ...lineData } = line;
+                const { /* accountLinks: lineAccountLinks, */ costCenterLinks: lineCostCenterLinks, ...lineData } = line; // Removed lineAccountLinks
                 const createdLine = await tx.documentLine.create({
                     data: { ...lineData, documentId: id, lineNumber: i + 1 }
                 });
-                if (lineAccountLinks && lineAccountLinks.length > 0) {
-                    await tx.documentLineAccountLink.createMany({
-                        data: lineAccountLinks.map(link => ({ ...link, documentLineId: createdLine.id }))
-                    });
-                }
+                // Removed block for lineAccountLinks
                 if (lineCostCenterLinks && lineCostCenterLinks.length > 0) {
                      await tx.documentLineCostCenterLink.createMany({
                         data: lineCostCenterLinks.map(link => ({ ...link, documentLineId: createdLine.id }))
@@ -392,14 +378,7 @@ export class DocumentsService {
                 data: paymentTerms.map((term, index) => ({ ...term, documentId: id, termNumber: index + 1, dueDate: new Date(term.dueDate) }))
             });
         }
-        if (accountLinks !== undefined) {
-            await tx.documentAccountLink.deleteMany({ where: { documentId: id } });
-            if (accountLinks.length > 0) {
-                await tx.documentAccountLink.createMany({
-                    data: accountLinks.map(link => ({ ...link, documentId: id }))
-                });
-            }
-        }
+        // Removed block for accountLinks
         if (costCenterLinks !== undefined) {
             await tx.documentCostCenterLink.deleteMany({ where: { documentId: id } });
             if (costCenterLinks.length > 0) {
@@ -506,7 +485,7 @@ export class DocumentsService {
     }
   }
 
-  async getDocumentsBySupplier(companyId: string, supplierId: string, filters: DocumentFiltersDto) {
+  async getDocumentsBySupplier(companyId: string, supplierId: string, filters: DocumentQueryDto) {
     this.logger.log(`Fetching documents for company ${companyId} by supplier ${supplierId}`);
     return this.fetchDocuments(companyId, { ...filters, supplierId });
   }
@@ -722,17 +701,17 @@ export class DocumentsService {
       },
       lines: {
         include: {
-          accountLinks: {
-            include: {
-              account: {
-                select: {
-                  id: true,
-                  accountCode: true,
-                  accountName: true,
-                },
-              },
-            },
-          },
+          // accountLinks: { // Removed
+          //   include: {
+          //     account: {
+          //       select: {
+          //         id: true,
+          //         accountCode: true,
+          //         accountName: true,
+          //       },
+          //     },
+          //   },
+          // },
           costCenterLinks: {
             include: {
               costCenter: {
@@ -747,17 +726,17 @@ export class DocumentsService {
         },
       },
       paymentTerms: true,
-      accountLinks: {
-        include: {
-          account: {
-            select: {
-              id: true,
-              accountCode: true,
-              accountName: true,
-            },
-          },
-        },
-      },
+      // accountLinks: { // Removed
+      //   include: {
+      //     account: {
+      //       select: {
+      //         id: true,
+      //         accountCode: true,
+      //         accountName: true,
+      //       },
+      //     },
+      //   },
+      // },
       costCenterLinks: {
         include: {
           costCenter: {
@@ -830,11 +809,11 @@ export class DocumentsService {
         taxableAmount: line.taxableAmount.toNumber(),
         exemptAmount: line.exemptAmount.toNumber(),
         inaffectedAmount: line.inaffectedAmount.toNumber(),
-        accountLinks: line.accountLinks.map(al => ({
-          ...al,
-          amount: al.amount.toNumber(),
-          // account is already selected with correct fields
-        })),
+        // accountLinks: line.accountLinks.map(al => ({ // Removed
+        //   ...al,
+        //   amount: al.amount.toNumber(),
+        //   // account is already selected with correct fields
+        // })),
         costCenterLinks: line.costCenterLinks.map(ccl => ({
           ...ccl,
           amount: ccl.amount.toNumber(),
@@ -845,11 +824,11 @@ export class DocumentsService {
         ...pt,
         amount: pt.amount.toNumber(),
       })),
-      accountLinks: document.accountLinks.map(al => ({
-        ...al,
-        amount: al.amount.toNumber(),
-        // account is already selected with correct fields
-      })),
+      // accountLinks: document.accountLinks.map(al => ({ // Removed
+      //   ...al,
+      //   amount: al.amount.toNumber(),
+      //   // account is already selected with correct fields
+      // })),
       costCenterLinks: document.costCenterLinks.map(ccl => ({
         ...ccl,
         amount: ccl.amount.toNumber(),

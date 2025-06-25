@@ -73,9 +73,5 @@ export class DocumentQueryDto extends PaginationDto {
 
   @IsOptional()
   @IsString()
-  accountId?: string
-
-  @IsOptional()
-  @IsString()
   costCenterId?: string
 }
