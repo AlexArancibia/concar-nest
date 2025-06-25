@@ -1,15 +1,15 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common"
 import { Prisma } from "@prisma/client"
-import { PrismaService } from "../prisma/prisma.service"
-import { CreateDocumentDto } from "./dto/create-document.dto"
-import { UpdateDocumentDto, ConciliateDocumentDto } from "./dto/update-document.dto"
-import { DocumentQueryDto } from "./dto/document-query.dto"
-import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto"
-import { DocumentStatus, Prisma as PrismaType } from "@prisma/client"
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateDocumentDto } from "./dto/create-document.dto";
+import { UpdateDocumentDto, ConciliateDocumentDto } from "./dto/update-document.dto";
+import { DocumentFiltersDto } from "./dto/document-filters.dto";
+import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto";
+import { DocumentStatus, Prisma as PrismaType } from "@prisma/client";
 
 @Injectable()
 export class DocumentsService {
-  private readonly logger = new Logger(DocumentsService.name)
+  private readonly logger = new Logger(DocumentsService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -218,7 +218,7 @@ export class DocumentsService {
     }
   }
 
-  async fetchDocuments(companyId: string, query: DocumentQueryDto) {
+  async fetchDocuments(companyId: string, filters: DocumentFiltersDto) {
     const {
       page = 1,
       limit = 10,
@@ -240,9 +240,9 @@ export class DocumentsService {
       hasDigitalSignature,
       accountId,
       costCenterId,
-    } = query
+    } = filters;
 
-    const skip = (page - 1) * limit
+    const skip = (page - 1) * limit;
     const where: PrismaType.DocumentWhereInput = {
       companyId,
       ...(supplierId && { supplierId }),
@@ -291,7 +291,7 @@ export class DocumentsService {
           { lines: { some: { description: { contains: search, mode: "insensitive" } } } },
         ],
       }),
-    }
+    };
 
     const [documents, total] = await Promise.all([
       this.prisma.document.findMany({
@@ -302,17 +302,15 @@ export class DocumentsService {
         take: limit,
       }),
       this.prisma.document.count({ where }),
-    ])
+    ]);
 
     return {
       data: documents.map((doc) => this.mapToResponseDto(doc)),
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    }
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async getDocumentById(id: string): Promise<DocumentResponseDto> {
@@ -581,8 +579,8 @@ export class DocumentsService {
     return documents.map((doc) => this.mapToResponseDto(doc))
   }
 
-  async getDocumentsBySupplier(companyId: string, supplierId: string, query: DocumentQueryDto) {
-    return this.fetchDocuments(companyId, { ...query, supplierId })
+  async getDocumentsBySupplier(companyId: string, supplierId: string, filters: DocumentFiltersDto) {
+    return this.fetchDocuments(companyId, { ...filters, supplierId });
   }
 
   async getDocumentsByDateRange(companyId: string, startDate: string, endDate: string) {

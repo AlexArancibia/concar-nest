@@ -11,12 +11,12 @@ import {
   HttpStatus,
   UseGuards,
 } from "@nestjs/common"
-import { AuthGuard } from "src/auth/guards/auth.guard"
-import { DocumentsService } from "./documents.service"
-import { CreateDocumentDto } from "./dto/create-document.dto"
-import { UpdateDocumentDto, UpdateDocumentStatusDto, ConciliateDocumentDto } from "./dto/update-document.dto"
-import { DocumentQueryDto } from "./dto/document-query.dto"
-import { DocumentStatus } from "@prisma/client"
+import { AuthGuard } from "src/auth/guards/auth.guard";
+import { DocumentsService } from "./documents.service";
+import { CreateDocumentDto } from "./dto/create-document.dto";
+import { UpdateDocumentDto, UpdateDocumentStatusDto, ConciliateDocumentDto } from "./dto/update-document.dto";
+import { DocumentFiltersDto } from "./dto/document-filters.dto";
+import { DocumentStatus } from "@prisma/client";
 
 @UseGuards(AuthGuard)
 @Controller("documents")
@@ -24,8 +24,8 @@ export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 
   @Get("company/:companyId")
-  async fetchDocuments(@Param('companyId') companyId: string, @Query() query: DocumentQueryDto) {
-    return this.documentsService.fetchDocuments(companyId, query)
+  async fetchDocuments(@Param('companyId') companyId: string, @Query() filters: DocumentFiltersDto) {
+    return this.documentsService.fetchDocuments(companyId, filters);
   }
 
   @Post()
@@ -58,9 +58,9 @@ export class DocumentsController {
   async getDocumentsBySupplier(
     @Param('companyId') companyId: string,
     @Param('supplierId') supplierId: string,
-    @Query() query: DocumentQueryDto,
+    @Query() filters: DocumentFiltersDto,
   ) {
-    return this.documentsService.getDocumentsBySupplier(companyId, supplierId, query)
+    return this.documentsService.getDocumentsBySupplier(companyId, supplierId, filters);
   }
 
   @Get("company/:companyId/date-range")
