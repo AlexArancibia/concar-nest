@@ -69,35 +69,40 @@ enum DocumentStatus {
 }
 
 enum TransactionType {
-
-  INCOME_SALARY         
-  INCOME_BONUS          
-  INCOME_TRANSFER       
-  INCOME_ADJUSTMENT     
+  // INGRESOS (montos positivos)
+  INCOME_SALARY         // Haberes, sueldos recibidos
+  INCOME_BONUS          // Bonificaciones recibidas
+  INCOME_TRANSFER       // Transferencias recibidas
+  INCOME_ADJUSTMENT     // Ajustes positivos
+  INCOME_REFUND         // Reembolsos recibidos
   
-  PAYROLL_SALARY        // Sueldos
-  PAYROLL_CTS           // CTS
-  PAYROLL_BONUS         // Gratificaciones o bonos
+  // EGRESOS - Nómina
+  PAYROLL_SALARY        // Pago de sueldos
+  PAYROLL_CTS           // Pago de CTS
+  PAYROLL_BONUS         // Pago de gratificaciones o bonos
   PAYROLL_AFP           // Aportes a AFP
 
+  // EGRESOS - Impuestos
   TAX_PAYMENT           // SUNAT, IGV, Renta, etc.
   TAX_ITF               // Impuesto a las transacciones financieras
   TAX_DETRACTION        // Pagos de detracción
 
+  // EGRESOS - Servicios
   EXPENSE_UTILITIES     // Servicios como luz, agua, internet
   EXPENSE_INSURANCE     // Seguros (ej. MAPFRE)
   EXPENSE_COMMISSIONS   // Comisiones, mantenimiento, portes
-  EXPENSE_PURCHASE      // Pago a proveedores
-  EXPENSE_OTHER         // Egresos varios
 
+  // EGRESOS - Transacciones
+  EXPENSE_PURCHASE      // Pago a proveedores
   TRANSFER_INBANK       // Transferencia dentro del mismo banco
   TRANSFER_EXTERNAL     // Transferencia interbancaria (CCE, etc.)
-
   WITHDRAWAL_CASH       // Retiro de efectivo
-  ADJUSTMENT            // Ajustes o regularizaciones
-  REFUND                 // Reembolso o devolución
-}
 
+  // EGRESOS - Varios
+  EXPENSE_OTHER         // Egresos varios
+  ADJUSTMENT            // Ajustes o regularizaciones negativas
+  REFUND                // Reembolsos otorgados
+}
 
 enum TransactionStatus {
   PENDING
