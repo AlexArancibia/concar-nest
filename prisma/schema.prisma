@@ -69,6 +69,12 @@ enum DocumentStatus {
 }
 
 enum TransactionType {
+
+  INCOME_SALARY         
+  INCOME_BONUS          
+  INCOME_TRANSFER       
+  INCOME_ADJUSTMENT     
+  
   PAYROLL_SALARY        // Sueldos
   PAYROLL_CTS           // CTS
   PAYROLL_BONUS         // Gratificaciones o bonos
