@@ -1,68 +1,38 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, InternalServerErrorException, ConflictException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../prisma/prisma.service";
-import { CreateDocumentDto } from "./dto/create-document.dto";
-import { UpdateDocumentDto, ConciliateDocumentDto } from "./dto/update-document.dto";
-import { DocumentQueryDto } from "./dto/document-filters.dto"; // Correctly aliased if DocumentFiltersDto is the intended name in this file
-import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto";
-import {
-  DocumentStatus,
-  Prisma as PrismaType,
-  Document,
-  Supplier,
-  DocumentLine,
-  // DocumentLineAccountLink, // Removed
-  // Account, // Removed
-  DocumentLineCostCenterLink,
-  CostCenter,
-  DocumentPaymentTerm,
-  // DocumentAccountLink, // Removed
-  DocumentCostCenterLink,
-  DocumentXmlData,
-  DocumentDigitalSignature,
-  DocumentDetraction
-} from "@prisma/client";
-
-// Define a more specific type for the document with all its relations
-type FullDocumentLine = DocumentLine & {
-  // accountLinks: (DocumentLineAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[]; // Removed
-  costCenterLinks: (DocumentLineCostCenterLink & { costCenter: Pick<CostCenter, 'id' | 'code' | 'name'> })[];
-};
-
-type FullDocument = Document & {
-  supplier: Pick<Supplier, 'id' | 'businessName' | 'documentNumber' | 'documentType'> | null;
-  lines: FullDocumentLine[];
-  paymentTerms: DocumentPaymentTerm[];
-  // accountLinks: (DocumentAccountLink & { account: Pick<Account, 'id' | 'accountCode' | 'accountName'> })[]; // Removed
-  costCenterLinks: (DocumentCostCenterLink & { costCenter: Pick<CostCenter, 'id' | 'code' | 'name'> })[];
-  xmlData: DocumentXmlData | null;
-  digitalSignature: DocumentDigitalSignature | null;
-  detraction: DocumentDetraction | null;
-};
+import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common"
+import { Prisma } from "@prisma/client"
+import { PrismaService } from "../prisma/prisma.service"
+import { CreateDocumentDto } from "./dto/create-document.dto"
+import { UpdateDocumentDto, ConciliateDocumentDto } from "./dto/update-document.dto"
+import { DocumentQueryDto } from "./dto/document-query.dto"
+import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto"
+import { DocumentStatus, Prisma as PrismaType } from "@prisma/client"
 
 @Injectable()
 export class DocumentsService {
-  private readonly logger = new Logger(DocumentsService.name);
+  private readonly logger = new Logger(DocumentsService.name)
 
   constructor(private readonly prisma: PrismaService) {}
 
   async createDocument(createDocumentDto: CreateDocumentDto): Promise<DocumentResponseDto> {
-    this.logger.log(`Attempting to create document: ${createDocumentDto.series}-${createDocumentDto.number} for company ${createDocumentDto.companyId}`);
+    this.logger.log(`Creating document: ${createDocumentDto.series}-${createDocumentDto.number}`)
 
     const {
       lines,
       paymentTerms,
-      // accountLinks, // Removed
+      accountLinks,
       costCenterLinks,
       xmlData,
       digitalSignature,
       detraction,
       ...documentData
-    } = createDocumentDto;
+    } = createDocumentDto
 
-    const fullNumber = `${documentData.series}-${documentData.number}`;
+    // Generate full number
+    const fullNumber = `${documentData.series}-${documentData.number}`
+    this.logger.log(`Generated full number: ${fullNumber}`)
 
     try {
+      // Check if document already exists
       const existingDocument = await this.prisma.document.findUnique({
         where: {
           companyId_fullNumber: {
@@ -70,63 +40,91 @@ export class DocumentsService {
             fullNumber: fullNumber,
           },
         },
-      });
+      })
 
       if (existingDocument) {
-        this.logger.warn(`Document ${fullNumber} already exists for company ${documentData.companyId}`);
-        throw new ConflictException(`Document ${fullNumber} already exists`);
+        throw new BadRequestException(`Document ${fullNumber} already exists`)
       }
 
+      // Verify supplier exists and belongs to company
       const supplier = await this.prisma.supplier.findFirst({
         where: {
           id: documentData.supplierId,
           companyId: documentData.companyId,
         },
-      });
+      })
 
       if (!supplier) {
-        this.logger.warn(`Supplier not found or does not belong to company ${documentData.companyId}: ${documentData.supplierId}`);
-        throw new NotFoundException("Supplier not found or does not belong to company");
+        throw new NotFoundException("Supplier not found or does not belong to company")
       }
 
+      // Calculate net payable amount
       const netPayableAmount = new Prisma.Decimal(documentData.total).minus(
         new Prisma.Decimal(documentData.retentionAmount || 0),
-      );
-      const pendingAmount = netPayableAmount.minus(new Prisma.Decimal(0));
+      )
+      const pendingAmount = netPayableAmount.minus(new Prisma.Decimal(0)) // Initially no conciliated amount
 
-      this.logger.log(`Calculated amounts for ${fullNumber} - Net payable: ${netPayableAmount}, Pending: ${pendingAmount}`);
+      this.logger.log(`Calculated amounts - Net payable: ${netPayableAmount}, Pending: ${pendingAmount}`)
 
       return await this.prisma.$transaction(async (tx) => {
-        this.logger.log(`Creating document ${fullNumber} in transaction...`);
+        // Create document
+        this.logger.log("Creating document in transaction...")
         const document = await tx.document.create({
           data: {
             ...documentData,
             fullNumber,
             netPayableAmount,
             pendingAmount,
-            updatedById: documentData.createdById, // Ensure this is set
+            updatedById: documentData.createdById,
           },
-        });
-        this.logger.log(`Document ${fullNumber} created with ID: ${document.id}`);
+        })
 
+        this.logger.log(`Document created with ID: ${document.id}`)
+
+        // Create lines with their account and cost center links
         if (lines && lines.length > 0) {
-          this.logger.log(`Creating ${lines.length} document lines for ${document.id}...`);
+          this.logger.log(`Creating ${lines.length} document lines...`)
           for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const { /* accountLinks: lineAccountLinks, */ costCenterLinks: lineCostCenterLinks, ...lineData } = line; // Removed lineAccountLinks
+            const line = lines[i]
+            const { accountLinks: lineAccountLinks, costCenterLinks: lineCostCenterLinks, ...lineData } = line
+
             const createdLine = await tx.documentLine.create({
-              data: { ...lineData, documentId: document.id, lineNumber: i + 1 },
-            });
-            // Removed block for lineAccountLinks
+              data: {
+                ...lineData,
+                documentId: document.id,
+                lineNumber: i + 1,
+              },
+            })
+
+            this.logger.log(`Created line ${i + 1} with ID: ${createdLine.id}`)
+
+            // Create line account links
+            if (lineAccountLinks && lineAccountLinks.length > 0) {
+              await tx.documentLineAccountLink.createMany({
+                data: lineAccountLinks.map((link) => ({
+                  ...link,
+                  documentLineId: createdLine.id,
+                })),
+              })
+              this.logger.log(`Created ${lineAccountLinks.length} account links for line ${i + 1}`)
+            }
+
+            // Create line cost center links
             if (lineCostCenterLinks && lineCostCenterLinks.length > 0) {
               await tx.documentLineCostCenterLink.createMany({
-                data: lineCostCenterLinks.map((link) => ({ ...link, documentLineId: createdLine.id })),
-              });
+                data: lineCostCenterLinks.map((link) => ({
+                  ...link,
+                  documentLineId: createdLine.id,
+                })),
+              })
+              this.logger.log(`Created ${lineCostCenterLinks.length} cost center links for line ${i + 1}`)
             }
           }
         }
 
+        // Create payment terms
         if (paymentTerms && paymentTerms.length > 0) {
+          this.logger.log(`Creating ${paymentTerms.length} payment terms...`)
           await tx.documentPaymentTerm.createMany({
             data: paymentTerms.map((term, index) => ({
               ...term,
@@ -134,63 +132,93 @@ export class DocumentsService {
               termNumber: index + 1,
               dueDate: new Date(term.dueDate),
             })),
-          });
+          })
         }
-        // ... (similar createMany for costCenterLinks, xmlData, digitalSignature, detraction if they exist) ...
-        // Removed block for accountLinks
+
+        // Create document account links
+        if (accountLinks && accountLinks.length > 0) {
+          this.logger.log(`Creating ${accountLinks.length} document account links...`)
+          await tx.documentAccountLink.createMany({
+            data: accountLinks.map((link) => ({
+              ...link,
+              documentId: document.id,
+            })),
+          })
+        }
+
+        // Create document cost center links
         if (costCenterLinks && costCenterLinks.length > 0) {
-            await tx.documentCostCenterLink.createMany({
-                data: costCenterLinks.map(link => ({ ...link, documentId: document.id }))
-            });
+          this.logger.log(`Creating ${costCenterLinks.length} document cost center links...`)
+          await tx.documentCostCenterLink.createMany({
+            data: costCenterLinks.map((link) => ({
+              ...link,
+              documentId: document.id,
+            })),
+          })
         }
+
+        // Create XML data
         if (xmlData) {
-            await tx.documentXmlData.create({
-                data: { ...xmlData, documentId: document.id, sunatProcessDate: xmlData.sunatProcessDate ? new Date(xmlData.sunatProcessDate) : null }
-            });
+          this.logger.log("Creating XML data...")
+          await tx.documentXmlData.create({
+            data: {
+              ...xmlData,
+              documentId: document.id,
+              sunatProcessDate: xmlData.sunatProcessDate ? new Date(xmlData.sunatProcessDate) : null,
+            },
+          })
         }
+
+        // Create digital signature
         if (digitalSignature) {
-            await tx.documentDigitalSignature.create({
-                data: { ...digitalSignature, documentId: document.id, signatureDate: digitalSignature.signatureDate ? new Date(digitalSignature.signatureDate) : null }
-            });
+          this.logger.log("Creating digital signature...")
+          await tx.documentDigitalSignature.create({
+            data: {
+              ...digitalSignature,
+              documentId: document.id,
+              signatureDate: digitalSignature.signatureDate ? new Date(digitalSignature.signatureDate) : null,
+            },
+          })
         }
+
+        // Create detraction
         if (detraction) {
-            const detractionAmount = detraction.amount || 0;
-            await tx.documentDetraction.create({
-                data: { ...detraction, documentId: document.id, amount: detractionAmount, pendingAmount: detractionAmount, paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null }
-            });
+          this.logger.log("Creating detraction...")
+          const detractionAmount = detraction.amount || 0
+          await tx.documentDetraction.create({
+            data: {
+              ...detraction,
+              documentId: document.id,
+              amount: detractionAmount,
+              pendingAmount: detractionAmount,
+              paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null,
+            },
+          })
         }
 
+        this.logger.log(`Transaction completed. Fetching complete document with ID: ${document.id}`)
 
-        this.logger.log(`Transaction for document ${document.id} completed. Fetching complete document.`);
+        // Return complete document - usar tx en lugar de this.prisma
         const completeDocument = await tx.document.findUnique({
           where: { id: document.id },
           include: this.getDocumentIncludes(),
-        });
+        })
 
         if (!completeDocument) {
-          this.logger.error(`Failed to fetch created document with ID: ${document.id} post-transaction.`);
-          // This should ideally not happen if the create was successful within the transaction.
-          throw new InternalServerErrorException(`Critical error: Created document ${document.id} not found immediately after creation.`);
+          this.logger.error(`Failed to fetch created document with ID: ${document.id}`)
+          throw new NotFoundException(`Created document not found: ${document.id}`)
         }
-        return this.mapToResponseDto(completeDocument);
-      });
+
+        this.logger.log(`Successfully created and fetched document: ${completeDocument.fullNumber}`)
+        return this.mapToResponseDto(completeDocument)
+      })
     } catch (error) {
-      this.logger.error(`Error during document creation (${fullNumber}): ${error.message}`, error.stack);
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        // Example: unique constraint violation
-        if (error.code === 'P2002') {
-          throw new ConflictException(`A document with similar unique properties (e.g., full number for company) already exists.`);
-        }
-      }
-      if (error instanceof NotFoundException || error instanceof BadRequestException || error instanceof ConflictException) {
-        throw error;
-      }
-      throw new InternalServerErrorException("An unexpected error occurred while creating the document.");
+      this.logger.error(`Error creating document: ${error.message}`, error.stack)
+      throw error
     }
   }
 
-  async fetchDocuments(companyId: string, filters: DocumentQueryDto) {
-    this.logger.log(`Fetching documents for company ${companyId} with filters: ${JSON.stringify(filters)}`);
+  async fetchDocuments(companyId: string, query: DocumentQueryDto) {
     const {
       page = 1,
       limit = 10,
@@ -210,11 +238,11 @@ export class DocumentsService {
       hasDetraction,
       hasXmlData,
       hasDigitalSignature,
-      // accountId, // Removed
+      accountId,
       costCenterId,
-    } = filters;
+    } = query
 
-    const skip = (page - 1) * limit;
+    const skip = (page - 1) * limit
     const where: PrismaType.DocumentWhereInput = {
       companyId,
       ...(supplierId && { supplierId }),
@@ -234,7 +262,9 @@ export class DocumentsService {
       ...(hasDigitalSignature !== undefined && {
         digitalSignature: hasDigitalSignature ? { isNot: null } : { is: null },
       }),
-      // Removed accountId filter block
+      ...(accountId && {
+        OR: [{ accountLinks: { some: { accountId } } }, { lines: { some: { accountLinks: { some: { accountId } } } } }],
+      }),
       ...(costCenterId && {
         OR: [
           { costCenterLinks: { some: { costCenterId } } },
@@ -261,432 +291,485 @@ export class DocumentsService {
           { lines: { some: { description: { contains: search, mode: "insensitive" } } } },
         ],
       }),
-    };
+    }
 
-    try {
-      const [documents, total] = await this.prisma.$transaction([
-        this.prisma.document.findMany({
-          where,
-          include: this.getDocumentIncludes(),
-          orderBy: { createdAt: "desc" },
-          skip,
-          take: limit,
-        }),
-        this.prisma.document.count({ where }),
-      ]);
-      this.logger.log(`Found ${total} documents for company ${companyId}`);
-      return {
-        data: documents.map((doc) => this.mapToResponseDto(doc)),
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      };
-    } catch (error) {
-        this.logger.error(`Error fetching documents for company ${companyId}: ${error.message}`, error.stack);
-        throw new InternalServerErrorException("Failed to fetch documents.");
+    const [documents, total] = await Promise.all([
+      this.prisma.document.findMany({
+        where,
+        include: this.getDocumentIncludes(),
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      }),
+      this.prisma.document.count({ where }),
+    ])
+
+    return {
+      data: documents.map((doc) => this.mapToResponseDto(doc)),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      
     }
   }
 
   async getDocumentById(id: string): Promise<DocumentResponseDto> {
-    this.logger.log(`Fetching document by ID: ${id}`);
+    this.logger.log(`Fetching document by ID: ${id}`)
+
     const document = await this.prisma.document.findUnique({
       where: { id },
       include: this.getDocumentIncludes(),
-    });
+    })
 
     if (!document) {
-      this.logger.warn(`Document not found with ID: ${id}`);
-      throw new NotFoundException(`Document with ID ${id} not found`);
+      this.logger.error(`Document not found with ID: ${id}`)
+      throw new NotFoundException("Document not found")
     }
-    this.logger.log(`Document found: ${document.fullNumber}`);
-    return this.mapToResponseDto(document);
+
+    this.logger.log(`Found document: ${document.fullNumber}`)
+    return this.mapToResponseDto(document)
   }
 
   async updateDocument(id: string, updateDocumentDto: UpdateDocumentDto): Promise<DocumentResponseDto> {
-    this.logger.log(`Attempting to update document: ${id}`);
     const existingDocument = await this.prisma.document.findUnique({
       where: { id },
-    });
+    })
 
     if (!existingDocument) {
-      this.logger.warn(`Document not found for update: ${id}`);
-      throw new NotFoundException(`Document with ID ${id} not found`);
+      throw new NotFoundException("Document not found")
     }
 
+    // Check if document can be updated based on status
     if (existingDocument.status === DocumentStatus.PAID || existingDocument.status === DocumentStatus.CANCELLED) {
-      this.logger.warn(`Attempt to update paid/cancelled document: ${id}`);
-      throw new BadRequestException("Cannot update paid or cancelled documents");
+      throw new BadRequestException("Cannot update paid or cancelled documents")
     }
 
     const {
       lines,
       paymentTerms,
-      // accountLinks, // Removed
+      accountLinks,
       costCenterLinks,
       xmlData,
       digitalSignature,
       detraction,
       ...documentData
-    } = updateDocumentDto;
+    } = updateDocumentDto
 
-    let netPayableAmount = existingDocument.netPayableAmount;
-    let pendingAmount = existingDocument.pendingAmount;
+    // Recalculate amounts if total changed
+    let netPayableAmount = existingDocument.netPayableAmount
+    let pendingAmount = existingDocument.pendingAmount
 
     if (documentData.total !== undefined) {
       netPayableAmount = new Prisma.Decimal(documentData.total).minus(
         new Prisma.Decimal(documentData.retentionAmount || existingDocument.retentionAmount.toNumber()),
-      );
-      pendingAmount = netPayableAmount.minus(existingDocument.conciliatedAmount);
+      )
+      pendingAmount = netPayableAmount.minus(existingDocument.conciliatedAmount)
     }
 
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        this.logger.log(`Updating document ${id} in transaction...`);
-        await tx.document.update({
-          where: { id },
-          data: {
-            ...documentData,
-            netPayableAmount,
-            pendingAmount,
-            updatedAt: new Date(), // Ensure updatedAt is always set
+    return this.prisma.$transaction(async (tx) => {
+      // Update document
+      await tx.document.update({
+        where: { id },
+        data: {
+          ...documentData,
+          netPayableAmount,
+          pendingAmount,
+          updatedAt: new Date(),
+        },
+      })
+
+      // Update lines if provided
+      if (lines) {
+        // Delete existing lines and their links
+        await tx.documentLineAccountLink.deleteMany({
+          where: { documentLine: { documentId: id } },
+        })
+        await tx.documentLineCostCenterLink.deleteMany({
+          where: { documentLine: { documentId: id } },
+        })
+        await tx.documentLine.deleteMany({
+          where: { documentId: id },
+        })
+
+        // Create new lines
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          const { accountLinks: lineAccountLinks, costCenterLinks: lineCostCenterLinks, ...lineData } = line
+
+          const createdLine = await tx.documentLine.create({
+            data: {
+              ...lineData,
+              documentId: id,
+              lineNumber: i + 1,
+            },
+          })
+
+          // Create line account links
+          if (lineAccountLinks && lineAccountLinks.length > 0) {
+            await tx.documentLineAccountLink.createMany({
+              data: lineAccountLinks.map((link) => ({
+                ...link,
+                documentLineId: createdLine.id,
+              })),
+            })
+          }
+
+          // Create line cost center links
+          if (lineCostCenterLinks && lineCostCenterLinks.length > 0) {
+            await tx.documentLineCostCenterLink.createMany({
+              data: lineCostCenterLinks.map((link) => ({
+                ...link,
+                documentLineId: createdLine.id,
+              })),
+            })
+          }
+        }
+      }
+
+      // Update payment terms if provided
+      if (paymentTerms) {
+        await tx.documentPaymentTerm.deleteMany({
+          where: { documentId: id },
+        })
+
+        await tx.documentPaymentTerm.createMany({
+          data: paymentTerms.map((term, index) => ({
+            ...term,
+            documentId: id,
+            termNumber: index + 1,
+            dueDate: new Date(term.dueDate),
+          })),
+        })
+      }
+
+      // Update account links if provided
+      if (accountLinks !== undefined) {
+        await tx.documentAccountLink.deleteMany({
+          where: { documentId: id },
+        })
+
+        if (accountLinks.length > 0) {
+          await tx.documentAccountLink.createMany({
+            data: accountLinks.map((link) => ({
+              ...link,
+              documentId: id,
+            })),
+          })
+        }
+      }
+
+      // Update cost center links if provided
+      if (costCenterLinks !== undefined) {
+        await tx.documentCostCenterLink.deleteMany({
+          where: { documentId: id },
+        })
+
+        if (costCenterLinks.length > 0) {
+          await tx.documentCostCenterLink.createMany({
+            data: costCenterLinks.map((link) => ({
+              ...link,
+              documentId: id,
+            })),
+          })
+        }
+      }
+
+      // Update XML data if provided
+      if (xmlData) {
+        await tx.documentXmlData.upsert({
+          where: { documentId: id },
+          update: {
+            ...xmlData,
+            sunatProcessDate: xmlData.sunatProcessDate ? new Date(xmlData.sunatProcessDate) : null,
+            updatedAt: new Date(),
           },
-        });
-
-        // ... (Logic for updating lines, paymentTerms, etc. as in original, with logging)
-        if (lines) {
-            // await tx.documentLineAccountLink.deleteMany({ where: { documentLine: { documentId: id } } }); // Removed
-            await tx.documentLineCostCenterLink.deleteMany({ where: { documentLine: { documentId: id } } });
-            await tx.documentLine.deleteMany({ where: { documentId: id } });
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                const { /* accountLinks: lineAccountLinks, */ costCenterLinks: lineCostCenterLinks, ...lineData } = line; // Removed lineAccountLinks
-                const createdLine = await tx.documentLine.create({
-                    data: { ...lineData, documentId: id, lineNumber: i + 1 }
-                });
-                // Removed block for lineAccountLinks
-                if (lineCostCenterLinks && lineCostCenterLinks.length > 0) {
-                     await tx.documentLineCostCenterLink.createMany({
-                        data: lineCostCenterLinks.map(link => ({ ...link, documentLineId: createdLine.id }))
-                    });
-                }
-            }
-        }
-        if (paymentTerms) {
-            await tx.documentPaymentTerm.deleteMany({ where: { documentId: id } });
-            await tx.documentPaymentTerm.createMany({
-                data: paymentTerms.map((term, index) => ({ ...term, documentId: id, termNumber: index + 1, dueDate: new Date(term.dueDate) }))
-            });
-        }
-        // Removed block for accountLinks
-        if (costCenterLinks !== undefined) {
-            await tx.documentCostCenterLink.deleteMany({ where: { documentId: id } });
-            if (costCenterLinks.length > 0) {
-                await tx.documentCostCenterLink.createMany({
-                    data: costCenterLinks.map(link => ({ ...link, documentId: id }))
-                });
-            }
-        }
-        if (xmlData) {
-            await tx.documentXmlData.upsert({
-                where: { documentId: id },
-                update: { ...xmlData, sunatProcessDate: xmlData.sunatProcessDate ? new Date(xmlData.sunatProcessDate) : null, updatedAt: new Date() },
-                create: { ...xmlData, documentId: id, sunatProcessDate: xmlData.sunatProcessDate ? new Date(xmlData.sunatProcessDate) : null }
-            });
-        }
-        if (digitalSignature) {
-             await tx.documentDigitalSignature.upsert({
-                where: { documentId: id },
-                update: { ...digitalSignature, signatureDate: digitalSignature.signatureDate ? new Date(digitalSignature.signatureDate) : null, updatedAt: new Date() },
-                create: { ...digitalSignature, documentId: id, signatureDate: digitalSignature.signatureDate ? new Date(digitalSignature.signatureDate) : null }
-            });
-        }
-        if (detraction) {
-            const detractionAmount = detraction.amount || 0;
-            const existingDetraction = await tx.documentDetraction.findUnique({ where: { documentId: id } });
-            await tx.documentDetraction.upsert({
-                where: { documentId: id },
-                update: { ...detraction, amount: detractionAmount, pendingAmount: new Prisma.Decimal(detractionAmount).minus(existingDetraction?.conciliatedAmount || 0), paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null, updatedAt: new Date() },
-                create: { ...detraction, documentId: id, amount: detractionAmount, pendingAmount: detractionAmount, paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null }
-            });
-        }
-
-        this.logger.log(`Transaction for document update ${id} completed. Fetching complete document.`);
-        const updatedDocument = await tx.document.findUnique({
-          where: { id },
-          include: this.getDocumentIncludes(),
-        });
-        if (!updatedDocument) {
-            this.logger.error(`Failed to fetch updated document with ID: ${id} post-transaction.`);
-            throw new InternalServerErrorException(`Critical error: Updated document ${id} not found immediately after update.`);
-        }
-        this.logger.log(`Document ${id} updated successfully.`);
-        return this.mapToResponseDto(updatedDocument);
-      });
-    } catch (error) {
-      this.logger.error(`Error updating document ${id}: ${error.message}`, error.stack);
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-         throw new NotFoundException(`Document with ID ${id} not found during update transaction.`);
+          create: {
+            ...xmlData,
+            documentId: id,
+            sunatProcessDate: xmlData.sunatProcessDate ? new Date(xmlData.sunatProcessDate) : null,
+          },
+        })
       }
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
-        throw error;
+
+      // Update digital signature if provided
+      if (digitalSignature) {
+        await tx.documentDigitalSignature.upsert({
+          where: { documentId: id },
+          update: {
+            ...digitalSignature,
+            signatureDate: digitalSignature.signatureDate ? new Date(digitalSignature.signatureDate) : null,
+            updatedAt: new Date(),
+          },
+          create: {
+            ...digitalSignature,
+            documentId: id,
+            signatureDate: digitalSignature.signatureDate ? new Date(digitalSignature.signatureDate) : null,
+          },
+        })
       }
-      throw new InternalServerErrorException("An unexpected error occurred while updating the document.");
-    }
+
+      // Update detraction if provided
+      if (detraction) {
+        const detractionAmount = detraction.amount || 0
+        await tx.documentDetraction.upsert({
+          where: { documentId: id },
+          update: {
+            ...detraction,
+            amount: detractionAmount,
+            pendingAmount: new Prisma.Decimal(detractionAmount).minus(
+              (await tx.documentDetraction.findUnique({ where: { documentId: id } }))?.conciliatedAmount ||
+                new Prisma.Decimal(0),
+            ),
+            paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null,
+            updatedAt: new Date(),
+          },
+          create: {
+            ...detraction,
+            documentId: id,
+            amount: detractionAmount,
+            pendingAmount: detractionAmount,
+            paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null,
+          },
+        })
+      }
+
+      // Fetch the updated document with all relations using the transaction
+      const updatedDocument = await tx.document.findUnique({
+        where: { id },
+        include: this.getDocumentIncludes(),
+      })
+
+      if (!updatedDocument) {
+        throw new NotFoundException(`Updated document not found: ${id}`)
+      }
+
+      return this.mapToResponseDto(updatedDocument)
+    })
   }
 
   async deleteDocument(id: string): Promise<void> {
-    this.logger.log(`Attempting to delete document: ${id}`);
     const document = await this.prisma.document.findUnique({
       where: { id },
-    });
+    })
 
     if (!document) {
-      this.logger.warn(`Document not found for deletion: ${id}`);
-      throw new NotFoundException(`Document with ID ${id} not found`);
+      throw new NotFoundException("Document not found")
     }
 
+    // Check if document can be deleted
     if (document.status === DocumentStatus.PAID || document.conciliatedAmount.greaterThan(0)) {
-      this.logger.warn(`Attempt to delete paid or conciliated document: ${id}`);
-      throw new BadRequestException("Cannot delete paid or conciliated documents");
+      throw new BadRequestException("Cannot delete paid or conciliated documents")
     }
 
-    try {
-      await this.prisma.document.delete({
-        where: { id },
-      });
-      this.logger.log(`Document ${id} deleted successfully.`);
-    } catch (error) {
-      this.logger.error(`Error deleting document ${id}: ${error.message}`, error.stack);
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-        // Should be caught by the findUnique check above, but as a safeguard.
-        throw new NotFoundException(`Document with ID ${id} not found for deletion.`);
-      }
-       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') { // Foreign key constraint
-        throw new ConflictException(`Cannot delete document ${id} due to existing related records.`);
-      }
-      throw new InternalServerErrorException("An unexpected error occurred while deleting the document.");
-    }
+    await this.prisma.document.delete({
+      where: { id },
+    })
   }
 
   async getDocumentsByStatus(companyId: string, status: DocumentStatus) {
-    this.logger.log(`Fetching documents for company ${companyId} by status: ${status}`);
-    try {
-        const documents = await this.prisma.document.findMany({
-          where: { companyId, status },
-          include: this.getDocumentIncludes(),
-          orderBy: { issueDate: "desc" },
-        });
-        this.logger.log(`Found ${documents.length} documents with status ${status} for company ${companyId}`);
-        return documents.map((doc) => this.mapToResponseDto(doc));
-    } catch (error) {
-        this.logger.error(`Error fetching documents by status for company ${companyId}: ${error.message}`, error.stack);
-        throw new InternalServerErrorException("Failed to fetch documents by status.");
-    }
+    const documents = await this.prisma.document.findMany({
+      where: {
+        companyId,
+        status,
+      },
+      include: this.getDocumentIncludes(),
+      orderBy: { issueDate: "desc" },
+    })
+
+    return documents.map((doc) => this.mapToResponseDto(doc))
   }
 
-  async getDocumentsBySupplier(companyId: string, supplierId: string, filters: DocumentQueryDto) {
-    this.logger.log(`Fetching documents for company ${companyId} by supplier ${supplierId}`);
-    return this.fetchDocuments(companyId, { ...filters, supplierId });
+  async getDocumentsBySupplier(companyId: string, supplierId: string, query: DocumentQueryDto) {
+    return this.fetchDocuments(companyId, { ...query, supplierId })
   }
 
   async getDocumentsByDateRange(companyId: string, startDate: string, endDate: string) {
-    this.logger.log(`Fetching documents for company ${companyId} by date range: ${startDate} - ${endDate}`);
-    try {
-        const documents = await this.prisma.document.findMany({
-          where: {
-            companyId,
-            issueDate: {
-              gte: new Date(startDate),
-              lte: new Date(endDate),
-            },
-          },
-          include: this.getDocumentIncludes(),
-          orderBy: { issueDate: "desc" },
-        });
-        this.logger.log(`Found ${documents.length} documents in date range for company ${companyId}`);
-        return documents.map((doc) => this.mapToResponseDto(doc));
-    } catch (error) {
-        this.logger.error(`Error fetching documents by date range for company ${companyId}: ${error.message}`, error.stack);
-        throw new InternalServerErrorException("Failed to fetch documents by date range.");
-    }
+    const documents = await this.prisma.document.findMany({
+      where: {
+        companyId,
+        issueDate: {
+          gte: new Date(startDate),
+          lte: new Date(endDate),
+        },
+      },
+      include: this.getDocumentIncludes(),
+      orderBy: { issueDate: "desc" },
+    })
+
+    return documents.map((doc) => this.mapToResponseDto(doc))
   }
 
   async updateDocumentStatus(id: string, status: DocumentStatus, updatedById: string): Promise<DocumentResponseDto> {
-    this.logger.log(`Updating status of document ${id} to ${status} by user ${updatedById}`);
-    // Ensure document exists before attempting update
-    const document = await this.prisma.document.findUnique({ where: { id } });
+    const document = await this.prisma.document.findUnique({
+      where: { id },
+    })
+
     if (!document) {
-        this.logger.warn(`Document not found for status update: ${id}`);
-        throw new NotFoundException(`Document with ID ${id} not found.`);
+      throw new NotFoundException("Document not found")
     }
 
-    try {
-        const updatedDocument = await this.prisma.document.update({
-          where: { id },
-          data: { status, updatedById, updatedAt: new Date() },
-          include: this.getDocumentIncludes(),
-        });
-        this.logger.log(`Document ${id} status updated to ${status}`);
-        return this.mapToResponseDto(updatedDocument);
-    } catch (error) {
-        this.logger.error(`Error updating status for document ${id}: ${error.message}`, error.stack);
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-             throw new NotFoundException(`Document with ID ${id} not found during status update.`);
-        }
-        throw new InternalServerErrorException("Failed to update document status.");
-    }
+    const updatedDocument = await this.prisma.document.update({
+      where: { id },
+      data: {
+        status,
+        updatedById,
+        updatedAt: new Date(),
+      },
+      include: this.getDocumentIncludes(),
+    })
+
+    return this.mapToResponseDto(updatedDocument)
   }
 
   async conciliateDocument(id: string, conciliateDto: ConciliateDocumentDto): Promise<DocumentResponseDto> {
-    this.logger.log(`Conciliating document ${id} with amount ${conciliateDto.conciliatedAmount}`);
-    const document = await this.prisma.document.findUnique({ where: { id } });
+    const document = await this.prisma.document.findUnique({
+      where: { id },
+    })
 
     if (!document) {
-      this.logger.warn(`Document not found for conciliation: ${id}`);
-      throw new NotFoundException(`Document with ID ${id} not found`);
+      throw new NotFoundException("Document not found")
     }
 
-    const newConciliatedAmount = document.conciliatedAmount.plus(new Prisma.Decimal(conciliateDto.conciliatedAmount));
-    const newPendingAmount = document.netPayableAmount.minus(newConciliatedAmount);
+    const newConciliatedAmount = document.conciliatedAmount.plus(new Prisma.Decimal(conciliateDto.conciliatedAmount))
+    const newPendingAmount = document.netPayableAmount.minus(newConciliatedAmount)
 
     if (newConciliatedAmount.greaterThan(document.netPayableAmount)) {
-      this.logger.warn(`Conciliation amount for document ${id} exceeds net payable amount.`);
-      throw new BadRequestException("Conciliated amount cannot exceed net payable amount");
+      throw new BadRequestException("Conciliated amount cannot exceed net payable amount")
     }
 
-    try {
-        const updatedDocument = await this.prisma.document.update({
-          where: { id },
-          data: {
-            conciliatedAmount: newConciliatedAmount,
-            pendingAmount: newPendingAmount,
-            status: newPendingAmount.isLessThanOrEqualTo(0) ? DocumentStatus.PAID : document.status,
-            updatedAt: new Date(),
-          },
-          include: this.getDocumentIncludes(),
-        });
-        this.logger.log(`Document ${id} conciliated. New pending amount: ${newPendingAmount}`);
-        return this.mapToResponseDto(updatedDocument);
-    } catch (error) {
-        this.logger.error(`Error conciliating document ${id}: ${error.message}`, error.stack);
-         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-             throw new NotFoundException(`Document with ID ${id} not found during conciliation update.`);
-        }
-        throw new InternalServerErrorException("Failed to conciliate document.");
-    }
+    const updatedDocument = await this.prisma.document.update({
+      where: { id },
+      data: {
+        conciliatedAmount: newConciliatedAmount,
+        pendingAmount: newPendingAmount,
+        status: newPendingAmount.lessThanOrEqualTo(0) ? DocumentStatus.PAID : document.status,
+        updatedAt: new Date(),
+      },
+      include: this.getDocumentIncludes(),
+    })
+
+    return this.mapToResponseDto(updatedDocument)
   }
 
   async getDocumentSummary(companyId: string): Promise<DocumentSummaryResponseDto> {
-    this.logger.log(`Fetching document summary for company ${companyId}`);
-    try {
-        const [totalDocuments, statusCounts, monthlyTotals, currencySummary, supplierSummary] = await this.prisma.$transaction([
-          this.prisma.document.count({ where: { companyId } }),
-          this.prisma.document.groupBy({
-            by: ["status"],
-            where: { companyId },
-            _count: { status: true },
-            _sum: { total: true },
-          }),
-          this.prisma.document.groupBy({
-            by: ["issueDate"],
-            where: { companyId, issueDate: { gte: new Date(new Date().getFullYear(), 0, 1) } },
-            _sum: { total: true },
-            _count: { id: true },
-          }),
-          this.prisma.document.groupBy({
-            by: ["currency"],
-            where: { companyId },
-            _sum: { total: true },
-            _count: { id: true },
-          }),
-          this.prisma.document.groupBy({
-            by: ["supplierId"],
-            where: { companyId },
-            _sum: { total: true },
-            _count: { id: true },
-            orderBy: { _sum: { total: "desc" } },
-            take: 10,
-          }),
-        ]);
+    const [totalDocuments, statusCounts, monthlyTotals, currencySummary, supplierSummary] = await Promise.all([
+      this.prisma.document.count({
+        where: { companyId },
+      }),
+      this.prisma.document.groupBy({
+        by: ["status"],
+        where: { companyId },
+        _count: { status: true },
+        _sum: { total: true },
+      }),
+      this.prisma.document.groupBy({
+        by: ["issueDate"],
+        where: {
+          companyId,
+          issueDate: {
+            gte: new Date(new Date().getFullYear(), 0, 1), // Current year
+          },
+        },
+        _sum: { total: true },
+        _count: { id: true },
+      }),
+      this.prisma.document.groupBy({
+        by: ["currency"],
+        where: { companyId },
+        _sum: { total: true },
+        _count: { id: true },
+      }),
+      this.prisma.document.groupBy({
+        by: ["supplierId"],
+        where: { companyId },
+        _sum: { total: true },
+        _count: { id: true },
+        orderBy: { _sum: { total: "desc" } },
+        take: 10,
+      }),
+    ])
 
-        const supplierIds = supplierSummary.map((s) => s.supplierId);
-        const suppliers = supplierIds.length > 0 ? await this.prisma.supplier.findMany({
-          where: { id: { in: supplierIds } },
-          select: { id: true, businessName: true },
-        }) : [];
-        const supplierMap = new Map(suppliers.map((s) => [s.id, s.businessName]));
+    // Get supplier names for supplier summary
+    const supplierIds = supplierSummary.map((s) => s.supplierId)
+    const suppliers = await this.prisma.supplier.findMany({
+      where: { id: { in: supplierIds } },
+      select: { id: true, businessName: true },
+    })
 
-        this.logger.log(`Document summary retrieved for company ${companyId}`);
-        return {
-          totalDocuments,
-          statusCounts: statusCounts.map((sc) => ({
-            status: sc.status,
-            _count: sc._count,
-            _sum: { total: sc._sum.total ? sc._sum.total.toNumber() : null },
-          })),
-          monthlyTotals: monthlyTotals.map((mt) => ({
-            month: mt.issueDate.toISOString().substring(0, 7),
-            totalAmount: mt._sum.total ? mt._sum.total.toNumber() : 0,
-            documentCount: mt._count.id,
-          })),
-          currencySummary: currencySummary.map((cs) => ({
-            currency: cs.currency,
-            totalAmount: cs._sum.total ? cs._sum.total.toNumber() : 0,
-            documentCount: cs._count.id,
-          })),
-          supplierSummary: supplierSummary.map((ss) => ({
-            supplierId: ss.supplierId,
-            supplierName: supplierMap.get(ss.supplierId) || "Unknown",
-            totalAmount: ss._sum.total ? ss._sum.total.toNumber() : 0,
-            documentCount: ss._count.id,
-          })),
-        };
-    } catch (error) {
-        this.logger.error(`Error fetching document summary for company ${companyId}: ${error.message}`, error.stack);
-        throw new InternalServerErrorException("Failed to fetch document summary.");
+    const supplierMap = new Map(suppliers.map((s) => [s.id, s.businessName]))
+
+    return {
+      totalDocuments,
+      statusCounts: statusCounts.map((sc) => ({
+        status: sc.status,
+        _count: sc._count,
+        _sum: { total: sc._sum.total ? sc._sum.total.toNumber() : null },
+      })),
+      monthlyTotals: monthlyTotals.map((mt) => ({
+        month: mt.issueDate.toISOString().substring(0, 7), // YYYY-MM format
+        totalAmount: mt._sum.total ? mt._sum.total.toNumber() : 0,
+        documentCount: mt._count.id,
+      })),
+      currencySummary: currencySummary.map((cs) => ({
+        currency: cs.currency,
+        totalAmount: cs._sum.total ? cs._sum.total.toNumber() : 0,
+        documentCount: cs._count.id,
+      })),
+      supplierSummary: supplierSummary.map((ss) => ({
+        supplierId: ss.supplierId,
+        supplierName: supplierMap.get(ss.supplierId) || "Unknown",
+        totalAmount: ss._sum.total ? ss._sum.total.toNumber() : 0,
+        documentCount: ss._count.id,
+      })),
     }
   }
 
   async getDocumentsWithPendingDetractions(companyId: string) {
-    this.logger.log(`Fetching documents with pending detractions for company ${companyId}`);
-    try {
-        const documents = await this.prisma.document.findMany({
-          where: {
-            companyId,
-            detraction: { hasDetraction: true, isConciliated: false },
+    const documents = await this.prisma.document.findMany({
+      where: {
+        companyId,
+        detraction: {
+          hasDetraction: true,
+          isConciliated: false,
+        },
+      },
+      include: {
+        supplier: {
+          select: {
+            id: true,
+            businessName: true,
+            documentNumber: true,
           },
-          include: {
-            supplier: { select: { id: true, businessName: true, documentNumber: true } },
-            detraction: true,
-          },
-          orderBy: { issueDate: "desc" },
-        });
-        this.logger.log(`Found ${documents.length} documents with pending detractions for company ${companyId}`);
-        return documents.map((doc) => this.mapToResponseDto(doc));
-    } catch (error) {
-        this.logger.error(`Error fetching documents with pending detractions for company ${companyId}: ${error.message}`, error.stack);
-        throw new InternalServerErrorException("Failed to fetch documents with pending detractions.");
-    }
+        },
+        detraction: true,
+      },
+      orderBy: { issueDate: "desc" },
+    })
+
+    return documents.map((doc) => this.mapToResponseDto(doc))
   }
 
   async getDocumentsWithXmlData(companyId: string) {
-    this.logger.log(`Fetching documents with XML data for company ${companyId}`);
-     try {
-        const documents = await this.prisma.document.findMany({
-          where: { companyId, xmlData: { isNot: null } },
-          include: {
-            supplier: { select: { id: true, businessName: true, documentNumber: true } },
-            xmlData: true,
+    const documents = await this.prisma.document.findMany({
+      where: {
+        companyId,
+        xmlData: { isNot: null },
+      },
+      include: {
+        supplier: {
+          select: {
+            id: true,
+            businessName: true,
+            documentNumber: true,
           },
-          orderBy: { createdAt: "desc" },
-        });
-        this.logger.log(`Found ${documents.length} documents with XML data for company ${companyId}`);
-        return documents.map((doc) => this.mapToResponseDto(doc));
-    } catch (error) {
-        this.logger.error(`Error fetching documents with XML data for company ${companyId}: ${error.message}`, error.stack);
-        throw new InternalServerErrorException("Failed to fetch documents with XML data.");
-    }
+        },
+        xmlData: true,
+      },
+      orderBy: { createdAt: "desc" },
+    })
+
+    return documents.map((doc) => this.mapToResponseDto(doc))
   }
 
   private getDocumentIncludes() {
@@ -701,17 +784,17 @@ export class DocumentsService {
       },
       lines: {
         include: {
-          // accountLinks: { // Removed
-          //   include: {
-          //     account: {
-          //       select: {
-          //         id: true,
-          //         accountCode: true,
-          //         accountName: true,
-          //       },
-          //     },
-          //   },
-          // },
+          accountLinks: {
+            include: {
+              account: {
+                select: {
+                  id: true,
+                  accountCode: true,
+                  accountName: true,
+                },
+              },
+            },
+          },
           costCenterLinks: {
             include: {
               costCenter: {
@@ -726,17 +809,17 @@ export class DocumentsService {
         },
       },
       paymentTerms: true,
-      // accountLinks: { // Removed
-      //   include: {
-      //     account: {
-      //       select: {
-      //         id: true,
-      //         accountCode: true,
-      //         accountName: true,
-      //       },
-      //     },
-      //   },
-      // },
+      accountLinks: {
+        include: {
+          account: {
+            select: {
+              id: true,
+              accountCode: true,
+              accountName: true,
+            },
+          },
+        },
+      },
       costCenterLinks: {
         include: {
           costCenter: {
@@ -751,12 +834,10 @@ export class DocumentsService {
       xmlData: true,
       digitalSignature: true,
       detraction: true,
-    };
+    }
   }
 
-  private mapToResponseDto(document: FullDocument): DocumentResponseDto {
-    // This mapping logic remains the same.
-    // Ensure all properties are correctly typed if 'any' is used.
+  private mapToResponseDto(document: any): DocumentResponseDto {
     return {
       id: document.id,
       companyId: document.companyId,
@@ -770,17 +851,17 @@ export class DocumentsService {
       dueDate: document.dueDate,
       receptionDate: document.receptionDate,
       currency: document.currency,
-      exchangeRate: document.exchangeRate, // Assuming this is already number or needs to be
-      subtotal: document.subtotal.toNumber(),
-      igv: document.igv.toNumber(),
-      otherTaxes: document.otherTaxes?.toNumber() || 0, // Assuming otherTaxes can be null
-      total: document.total.toNumber(),
+      exchangeRate: document.exchangeRate,
+      subtotal: document.subtotal,
+      igv: document.igv,
+      otherTaxes: document.otherTaxes,
+      total: document.total,
       hasRetention: document.hasRetention,
-      retentionAmount: document.retentionAmount.toNumber(),
-      retentionPercentage: document.retentionPercentage, // Assuming this is already number
-      netPayableAmount: document.netPayableAmount.toNumber(),
-      conciliatedAmount: document.conciliatedAmount.toNumber(),
-      pendingAmount: document.pendingAmount.toNumber(),
+      retentionAmount: document.retentionAmount,
+      retentionPercentage: document.retentionPercentage,
+      netPayableAmount: document.netPayableAmount,
+      conciliatedAmount: document.conciliatedAmount,
+      pendingAmount: document.pendingAmount,
       paymentMethod: document.paymentMethod,
       description: document.description,
       observations: document.observations,
@@ -796,53 +877,13 @@ export class DocumentsService {
       createdById: document.createdById,
       updatedById: document.updatedById,
       supplier: document.supplier,
-      lines: document.lines.map(line => ({
-        ...line,
-        quantity: line.quantity.toNumber(),
-        unitPrice: line.unitPrice.toNumber(),
-        unitPriceWithTax: line.unitPriceWithTax.toNumber(),
-        lineTotal: line.lineTotal.toNumber(),
-        igvAmount: line.igvAmount.toNumber(),
-        referencePrice: line.referencePrice?.toNumber(),
-        allowanceAmount: line.allowanceAmount?.toNumber() || 0,
-        chargeAmount: line.chargeAmount?.toNumber() || 0,
-        taxableAmount: line.taxableAmount.toNumber(),
-        exemptAmount: line.exemptAmount.toNumber(),
-        inaffectedAmount: line.inaffectedAmount.toNumber(),
-        // accountLinks: line.accountLinks.map(al => ({ // Removed
-        //   ...al,
-        //   amount: al.amount.toNumber(),
-        //   // account is already selected with correct fields
-        // })),
-        costCenterLinks: line.costCenterLinks.map(ccl => ({
-          ...ccl,
-          amount: ccl.amount.toNumber(),
-          // costCenter is already selected with correct fields
-        })),
-      })),
-      paymentTerms: document.paymentTerms.map(pt => ({
-        ...pt,
-        amount: pt.amount.toNumber(),
-      })),
-      // accountLinks: document.accountLinks.map(al => ({ // Removed
-      //   ...al,
-      //   amount: al.amount.toNumber(),
-      //   // account is already selected with correct fields
-      // })),
-      costCenterLinks: document.costCenterLinks.map(ccl => ({
-        ...ccl,
-        amount: ccl.amount.toNumber(),
-        // costCenter is already selected with correct fields
-      })),
-      xmlData: document.xmlData, // Assuming DTO matches Prisma or is handled
-      digitalSignature: document.digitalSignature, // Assuming DTO matches Prisma or is handled
-      detraction: document.detraction ? {
-        ...document.detraction,
-        amount: document.detraction.amount.toNumber(),
-        percentage: document.detraction.percentage, // Assuming this is number
-        conciliatedAmount: document.detraction.conciliatedAmount.toNumber(),
-        pendingAmount: document.detraction.pendingAmount.toNumber(),
-      } : null,
-    };
+      lines: document.lines,
+      paymentTerms: document.paymentTerms,
+      accountLinks: document.accountLinks,
+      costCenterLinks: document.costCenterLinks,
+      xmlData: document.xmlData,
+      digitalSignature: document.digitalSignature,
+      detraction: document.detraction,
+    }
   }
 }
