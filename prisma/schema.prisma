@@ -73,8 +73,22 @@ enum TransactionType {
   INCOME_SALARY         // Haberes, sueldos recibidos
   INCOME_BONUS          // Bonificaciones recibidas
   INCOME_TRANSFER       // Transferencias recibidas
+  INCOME_DEPOSIT       // Depósitos directos
   INCOME_ADJUSTMENT     // Ajustes positivos
-  INCOME_REFUND         // Reembolsos recibidos
+  INCOME_REFUND         // Reembolsos 
+  
+  INCOME_INTEREST      // Intereses bancarios
+  INCOME_INVESTMENT    // Rendimiento de inversiones
+  INCOME_DIVIDENDS    // Dividendos
+  
+  /** Ventas */
+  INCOME_SALES            // Ingresos por ventas
+  INCOME_SERVICES     // Ingresos por servicios
+  
+  /** Transferencias */
+  INCOME_TAX_REFUND  // Devolución de impuestos
+  /** Otros */
+  INCOME_OTHER         // Otros ingresos varios
   
   // EGRESOS - Nómina
   PAYROLL_SALARY        // Pago de sueldos
