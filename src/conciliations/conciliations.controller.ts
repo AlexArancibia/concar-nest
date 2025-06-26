@@ -23,6 +23,7 @@ import { UpdateConciliationExpenseDto } from "./dto/update-conciliation-expense.
 import { PaginationDto } from "../common/dto/pagination.dto"
 import { ConciliationFiltersDto } from "./dto/conciliation-filters.dto"
 import { ValidateConciliationDto } from "./dto/validate-conciliation.dto"
+import { ConciliationQueryDto } from "./dto/conciliation-query.dto"
 
 @UseGuards(AuthGuard)
 @Controller("conciliations")
@@ -31,11 +32,11 @@ export class ConciliationsController {
 
   // Conciliation endpoints
   @Get("company/:companyId")
-  async fetchConciliations(@Param("companyId") companyId: string, @Query() pagination: PaginationDto) {
+  async fetchConciliations(@Param("companyId") companyId: string, @Query() conciliationQueryDto: ConciliationQueryDto) {
     if (!companyId) {
       throw new BadRequestException("Company ID is required")
     }
-    return this.conciliationsService.fetchConciliations(companyId, pagination)
+    return this.conciliationsService.fetchConciliations(companyId, conciliationQueryDto)
   }
 
   @Post()

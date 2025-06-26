@@ -20,6 +20,7 @@ import { CreateTransactionDto } from "./dto/create-transaction.dto"
 import { UpdateTransactionDto } from "./dto/update-transaction.dto"
 import { PaginationDto } from "../common/dto/pagination.dto"
 import { TransactionStatus } from "@prisma/client"
+import { TransactionQueryDto } from "./dto/transaction-query.dto"
 
 @UseGuards(AuthGuard)
 @Controller("transactions")
@@ -27,8 +28,8 @@ export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
   @Get("company/:companyId")
-  async fetchTransactions(@Param("companyId") companyId: string, @Query() pagination: PaginationDto) {
-    return this.transactionsService.fetchTransactions(companyId, pagination)
+  async fetchTransactions(@Param("companyId") companyId: string, @Query() transactionQueryDto: TransactionQueryDto) {
+    return this.transactionsService.fetchTransactions(companyId, transactionQueryDto)
   }
 
   @Post()

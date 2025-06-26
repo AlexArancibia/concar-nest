@@ -3,45 +3,110 @@ import  { PrismaService } from "../prisma/prisma.service"
 import  { CreateTransactionDto } from "./dto/create-transaction.dto"
 import  { UpdateTransactionDto } from "./dto/update-transaction.dto"
 import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import  { Transaction, TransactionStatus } from "@prisma/client"
+import  { Prisma, Transaction, TransactionStatus } from "@prisma/client"
 import { createHash } from "crypto"
+import { TransactionQueryDto } from "./dto/transaction-query.dto"
 
 @Injectable()
 export class TransactionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async fetchTransactions(companyId: string, pagination: PaginationDto): Promise<PaginatedResponse<Transaction>> {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
+ async fetchTransactions(
+  companyId: string,
+  transactionQueryDto: TransactionQueryDto
+): Promise<PaginatedResponse<Transaction>> {
+  const {
+    page = 1,
+    limit = 10,
+    status,
+    type,
+    dateFrom,
+    dateTo,
+    search,
+    bankAccountId,
+    minAmount,
+    maxAmount,
+    reference,
+    operationNumber,
+    channel
+  } = transactionQueryDto;
 
-    const [transactions, total] = await Promise.all([
-      this.prisma.transaction.findMany({
-        where: { companyId },
-        include: {
-          bankAccount: {
-            include: {
-              bank: true,
-              currencyRef: true,
-            },
-          },
-        },
-        orderBy: { transactionDate: "desc" },
-        skip,
-        take: limit,
-      }),
-      this.prisma.transaction.count({
-        where: { companyId },
-      }),
-    ])
+  const skip = (page - 1) * limit;
+  const where: Prisma.TransactionWhereInput = { companyId };
 
-    return {
-      data: transactions,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    }
+  // Filtros directos
+  if (status) where.status = status;
+  if (type) where.transactionType = type;
+  if (bankAccountId) where.bankAccountId = bankAccountId;
+  if (reference) where.reference = { contains: reference, mode: 'insensitive' };
+  if (operationNumber) where.operationNumber = operationNumber;
+  if (channel) where.channel = channel;
+
+  // Filtros de rango
+  if (dateFrom || dateTo) {
+    where.transactionDate = {
+      ...(dateFrom && { gte: new Date(dateFrom) }),
+      ...(dateTo && { lte: new Date(dateTo) })
+    };
   }
+
+  if (minAmount || maxAmount) {
+    where.amount = {
+      ...(minAmount && { gte: new Prisma.Decimal(minAmount) }),
+      ...(maxAmount && { lte: new Prisma.Decimal(maxAmount) })
+    };
+  }
+
+  // Búsqueda textual global
+  if (search) {
+    where.OR = [
+      { description: { contains: search, mode: 'insensitive' } },
+      { reference: { contains: search, mode: 'insensitive' } },
+      { operationNumber: { contains: search, mode: 'insensitive' } },
+      { branch: { contains: search, mode: 'insensitive' } },
+      { fileName: { contains: search, mode: 'insensitive' } }
+    ];
+  }
+
+  const [transactions, total] = await Promise.all([
+    this.prisma.transaction.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        bankAccount: {
+          include: {
+            bank: {
+              select: {
+                name: true,
+                code: true,
+              }
+            },
+            currencyRef: {
+              select: {
+                code: true,
+                symbol: true,
+              }
+            }
+          }
+        }
+      },
+      orderBy: [
+        { transactionDate: 'desc' },
+        { createdAt: 'desc' }
+      ]
+    }),
+    this.prisma.transaction.count({ where })
+  ]);
+
+  return {
+    data: transactions,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit)
+  };
+}
 
   async createTransaction(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
     const { companyId, bankAccountId, transactionDate, description, transactionType, amount, balance, ...otherFields } =
