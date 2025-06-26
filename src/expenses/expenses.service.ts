@@ -1,19 +1,74 @@
-import { Injectable, NotFoundException } from "@nestjs/common"
-import   { PrismaService } from "../prisma/prisma.service"
-import   { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import {   Expense, ExpenseStatus } from "@prisma/client"
+import { Injectable, NotFoundException, Logger, InternalServerErrorException, ConflictException } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto";
+import { Expense, ExpenseStatus, Prisma } from "@prisma/client"; // Added Prisma for error types
+import { CreateExpenseDto } from "./dto/create-expense.dto"; // Assuming this DTO exists
+import { UpdateExpenseDto } from "./dto/update-expense.dto"; // Assuming this DTO exists
 
 @Injectable()
 export class ExpensesService {
+  private readonly logger = new Logger(ExpensesService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async fetchExpenses(companyId: string, pagination?: PaginationDto): Promise<PaginatedResponse<Expense>> {
-    const { page = 1, limit = 10 } = pagination || {}
-    const skip = (page - 1) * limit
+    this.logger.log(`Fetching expenses for company ${companyId} with pagination: ${JSON.stringify(pagination)}`);
+    const { page = 1, limit = 10 } = pagination || {};
+    const skip = (page - 1) * limit;
 
-    const [expenses, total] = await Promise.all([
-      this.prisma.expense.findMany({
-        where: { companyId },
+    try {
+      const [expenses, total] = await this.prisma.$transaction([
+        this.prisma.expense.findMany({
+          where: { companyId },
+          include: {
+            bankAccount: true,
+            supplier: true,
+            document: true,
+            importedBy: {
+              select: { id: true, firstName: true, lastName: true, email: true },
+            },
+          },
+          orderBy: { transactionDate: "desc" },
+          skip,
+          take: limit,
+        }),
+        this.prisma.expense.count({ where: { companyId } }),
+      ]);
+
+      this.logger.log(`Found ${total} expenses for company ${companyId}`);
+      return {
+        data: expenses,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
+    } catch (error) {
+      this.logger.error(`Error fetching expenses for company ${companyId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException("Failed to fetch expenses.");
+    }
+  }
+
+  async createExpense(expenseDto: CreateExpenseDto): Promise<Expense> { // Changed 'any' to CreateExpenseDto
+    this.logger.log(`Creating expense for company ${expenseDto.companyId}`);
+    // Destructure to remove currency if it's causing issues, assuming currencyId might be in expenseDto
+    const { currency, ...restOfExpenseDto } = expenseDto;
+
+    const expenseData = {
+      ...restOfExpenseDto, // Spread the rest of the DTO
+      transactionDate: new Date(expenseDto.transactionDate), // Ensure date conversion (use original expenseDto for safety here)
+      valueDate: expenseDto.valueDate ? new Date(expenseDto.valueDate) : null,
+      documentDate: expenseDto.documentDate ? new Date(expenseDto.documentDate) : null,
+      issueDate: expenseDto.issueDate ? new Date(expenseDto.issueDate) : null,
+      dueDate: expenseDto.dueDate ? new Date(expenseDto.dueDate) : null,
+      status: expenseDto.status || ExpenseStatus.IMPORTED,
+      // Ensure other fields like rowHash, importedAt are handled correctly if part of DTO or set by default
+      // If currencyId is in expenseDto, it will be included via ...restOfExpenseDto
+    };
+
+    try {
+      const createdExpense = await this.prisma.expense.create({
+        data: expenseData,
         include: {
           bankAccount: true,
           supplier: true,
@@ -22,136 +77,98 @@ export class ExpensesService {
             select: { id: true, firstName: true, lastName: true, email: true },
           },
         },
-        orderBy: { transactionDate: "desc" },
-        skip,
-        take: limit,
-      }),
-      this.prisma.expense.count({ where: { companyId } }),
-    ])
-
-    return {
-      data: expenses,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
+      });
+      this.logger.log(`Expense created with ID: ${createdExpense.id}`);
+      return createdExpense;
+    } catch (error) {
+      this.logger.error(`Error creating expense: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') { // Unique constraint violation
+          throw new ConflictException("Expense with this data (e.g., rowHash) may already exist.");
+        }
+        // Add more specific Prisma error handling if needed
+      }
+      throw new InternalServerErrorException("Failed to create expense.");
     }
   }
 
-  async createExpense(expenseDto: any): Promise<Expense> {
-    const expenseData = {
-      ...expenseDto,
-      transactionDate:
-        typeof expenseDto.transactionDate === "string"
-          ? new Date(expenseDto.transactionDate)
-          : expenseDto.transactionDate,
-      valueDate: expenseDto.valueDate
-        ? typeof expenseDto.valueDate === "string"
-          ? new Date(expenseDto.valueDate)
-          : expenseDto.valueDate
-        : null,
-      documentDate: expenseDto.documentDate
-        ? typeof expenseDto.documentDate === "string"
-          ? new Date(expenseDto.documentDate)
-          : expenseDto.documentDate
-        : null,
-      issueDate: expenseDto.issueDate
-        ? typeof expenseDto.issueDate === "string"
-          ? new Date(expenseDto.issueDate)
-          : expenseDto.issueDate
-        : null,
-      dueDate: expenseDto.dueDate
-        ? typeof expenseDto.dueDate === "string"
-          ? new Date(expenseDto.dueDate)
-          : expenseDto.dueDate
-        : null,
-      status: expenseDto.status || ExpenseStatus.IMPORTED,
-      rowHash: expenseDto.rowHash || null,
-      importedAt: expenseDto.importedAt || new Date(),
-      processedAt: expenseDto.processedAt || null,
-      processedById: expenseDto.processedById || null,
-      reconciledAt: expenseDto.reconciledAt || null,
-      reconciledById: expenseDto.reconciledById || null,
-    }
-
-    return this.prisma.expense.create({
-      data: expenseData,
-      include: {
-        bankAccount: true,
-        supplier: true,
-        document: true,
-        importedBy: {
-          select: { id: true, firstName: true, lastName: true, email: true },
-        },
-      },
-    })
-  }
-
-  async updateExpense(id: string, updates: any): Promise<Expense> {
+  async updateExpense(id: string, updates: UpdateExpenseDto): Promise<Expense> { // Changed 'any' to UpdateExpenseDto
+    this.logger.log(`Updating expense with ID: ${id}`);
     const existingExpense = await this.prisma.expense.findUnique({
       where: { id },
-    })
+    });
 
     if (!existingExpense) {
-      throw new NotFoundException(`Expense with ID ${id} not found`)
+      this.logger.warn(`Expense not found for update: ${id}`);
+      throw new NotFoundException(`Expense with ID ${id} not found`);
     }
 
-    // Convert string dates to Date objects
-    const updateData = { ...updates }
-    if (updateData.transactionDate && typeof updateData.transactionDate === "string") {
-      updateData.transactionDate = new Date(updateData.transactionDate)
-    }
-    if (updateData.valueDate && typeof updateData.valueDate === "string") {
-      updateData.valueDate = new Date(updateData.valueDate)
-    }
-    if (updateData.documentDate && typeof updateData.documentDate === "string") {
-      updateData.documentDate = new Date(updateData.documentDate)
-    }
-    if (updateData.issueDate && typeof updateData.issueDate === "string") {
-      updateData.issueDate = new Date(updateData.issueDate)
-    }
-    if (updateData.dueDate && typeof updateData.dueDate === "string") {
-      updateData.dueDate = new Date(updateData.dueDate)
-    }
-    if (updateData.processedAt && typeof updateData.processedAt === "string") {
-      updateData.processedAt = new Date(updateData.processedAt)
-    }
-    if (updateData.reconciledAt && typeof updateData.reconciledAt === "string") {
-      updateData.reconciledAt = new Date(updateData.reconciledAt)
+    const updateData = { ...updates };
+    // Date conversions (if strings are passed, which should ideally be Date objects from DTO)
+    for (const key of ['transactionDate', 'valueDate', 'documentDate', 'issueDate', 'dueDate', 'processedAt', 'reconciledAt']) {
+      if (updateData[key] && typeof updateData[key] === 'string') {
+        updateData[key] = new Date(updateData[key]);
+      }
     }
 
-    return this.prisma.expense.update({
-      where: { id },
-      data: {
-        ...updateData,
-        updatedAt: new Date(),
-      },
-      include: {
-        bankAccount: true,
-        supplier: true,
-        document: true,
-        importedBy: {
-          select: { id: true, firstName: true, lastName: true, email: true },
+    try {
+      const updatedExpense = await this.prisma.expense.update({
+        where: { id },
+        data: {
+          ...updateData,
+          updatedAt: new Date(), // Always set updatedAt
         },
-      },
-    })
+        include: {
+          bankAccount: true,
+          supplier: true,
+          document: true,
+          importedBy: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+        },
+      });
+      this.logger.log(`Expense with ID ${id} updated successfully.`);
+      return updatedExpense;
+    } catch (error) {
+      this.logger.error(`Error updating expense ${id}: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`Expense with ID ${id} not found during update.`);
+      }
+      throw new InternalServerErrorException("Failed to update expense.");
+    }
   }
 
   async deleteExpense(id: string): Promise<void> {
+    this.logger.log(`Attempting to delete expense with ID: ${id}`);
     const expense = await this.prisma.expense.findUnique({
       where: { id },
-    })
+    });
 
     if (!expense) {
-      throw new NotFoundException(`Expense with ID ${id} not found`)
+      this.logger.warn(`Expense not found for deletion: ${id}`);
+      throw new NotFoundException(`Expense with ID ${id} not found`);
     }
 
-    await this.prisma.expense.delete({
-      where: { id },
-    })
+    try {
+      await this.prisma.expense.delete({
+        where: { id },
+      });
+      this.logger.log(`Expense with ID ${id} deleted successfully.`);
+    } catch (error) {
+      this.logger.error(`Error deleting expense ${id}: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`Expense with ID ${id} not found during deletion.`);
+      }
+      // Consider P2003 for foreign key constraints if applicable
+       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+        throw new ConflictException(`Cannot delete expense ${id} due to existing related records.`);
+      }
+      throw new InternalServerErrorException("Failed to delete expense.");
+    }
   }
 
-  async getExpenseById(id: string): Promise<Expense | undefined> {
+  async getExpenseById(id: string): Promise<Expense | null> { // Return null if not found, controller handles 404
+    this.logger.log(`Fetching expense by ID: ${id}`);
     const expense = await this.prisma.expense.findUnique({
       where: { id },
       include: {
@@ -168,38 +185,71 @@ export class ExpensesService {
           select: { id: true, firstName: true, lastName: true, email: true },
         },
       },
-    })
+    });
 
-    return expense || undefined
+    if (!expense) {
+        this.logger.warn(`Expense with ID ${id} not found.`);
+        return null; // Controller will typically convert this to a 404 response
+    }
+    return expense;
   }
 
   async getExpensesByStatus(companyId: string, status: ExpenseStatus): Promise<Expense[]> {
-    return this.prisma.expense.findMany({
-      where: { companyId, status },
-      include: {
-        bankAccount: true,
-        supplier: true,
-        document: true,
-      },
-      orderBy: { transactionDate: "desc" },
-    })
+    this.logger.log(`Fetching expenses for company ${companyId} by status: ${status}`);
+    try {
+      return await this.prisma.expense.findMany({
+        where: { companyId, status },
+        include: {
+          bankAccount: true,
+          supplier: true,
+          document: true,
+        },
+        orderBy: { transactionDate: "desc" },
+      });
+    } catch (error) {
+      this.logger.error(`Error fetching expenses by status for company ${companyId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException("Failed to fetch expenses by status.");
+    }
   }
 
   async reconcileExpense(id: string, documentId: string, reconciledById: string): Promise<Expense> {
-    return this.prisma.expense.update({
-      where: { id },
-      data: {
-        documentId,
-        status: ExpenseStatus.PROCESSED,
-        reconciledAt: new Date(),
-        reconciledById,
-        updatedAt: new Date(),
-      },
-      include: {
-        bankAccount: true,
-        supplier: true,
-        document: true,
-      },
-    })
+    this.logger.log(`Reconciling expense ID: ${id} with document ID: ${documentId} by user: ${reconciledById}`);
+    // Check if expense exists
+    const expense = await this.prisma.expense.findUnique({ where: {id}});
+    if (!expense) {
+        this.logger.warn(`Expense not found for reconciliation: ${id}`);
+        throw new NotFoundException(`Expense with ID ${id} not found.`);
+    }
+    // Optionally, check if document exists
+    // const doc = await this.prisma.document.findUnique({ where: {id: documentId}});
+    // if (!doc) {
+    //     this.logger.warn(`Document not found for reconciliation: ${documentId}`);
+    //     throw new NotFoundException(`Document with ID ${documentId} not found.`);
+    // }
+    try {
+      const reconciledExpense = await this.prisma.expense.update({
+        where: { id },
+        data: {
+          documentId,
+          status: ExpenseStatus.PROCESSED, // Or RECONCILED, depending on your status flow
+          reconciledAt: new Date(),
+          reconciledById,
+          updatedAt: new Date(),
+        },
+        include: {
+          bankAccount: true,
+          supplier: true,
+          document: true,
+        },
+      });
+      this.logger.log(`Expense ${id} reconciled successfully.`);
+      return reconciledExpense;
+    } catch (error) {
+        this.logger.error(`Error reconciling expense ${id}: ${error.message}`, error.stack);
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+             throw new NotFoundException(`Expense with ID ${id} not found during reconciliation.`);
+        }
+        throw new InternalServerErrorException("Failed to reconcile expense.");
+    }
   }
 }

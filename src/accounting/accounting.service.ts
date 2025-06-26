@@ -1,15 +1,17 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common"
-import { Prisma } from "@prisma/client"
-import { PrismaService } from "../prisma/prisma.service"
-import { CreateAccountingAccountDto } from "./dto/create-accounting-account.dto"
-import { UpdateAccountingAccountDto } from "./dto/update-accounting-account.dto"
-import { CreateCostCenterDto } from "./dto/create-cost-center.dto"
-import { UpdateCostCenterDto } from "./dto/update-cost-center.dto"
-import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import { AccountingAccount, CostCenter } from "@prisma/client"
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger, InternalServerErrorException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateAccountingAccountDto } from "./dto/create-accounting-account.dto";
+import { UpdateAccountingAccountDto } from "./dto/update-accounting-account.dto";
+import { CreateCostCenterDto } from "./dto/create-cost-center.dto";
+import { UpdateCostCenterDto } from "./dto/update-cost-center.dto";
+import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto";
+import { AccountingAccount, CostCenter } from "@prisma/client";
 
 @Injectable()
 export class AccountingService {
+  private readonly logger = new Logger(AccountingService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   // ============================================================================
@@ -20,286 +22,215 @@ export class AccountingService {
     companyId: string,
     pagination: PaginationDto,
   ): Promise<PaginatedResponse<AccountingAccount>> {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
+    this.logger.log(`Fetching accounting accounts for company ${companyId} with pagination: ${JSON.stringify(pagination)}`);
+    const { page = 1, limit = 10 } = pagination;
+    const skip = (page - 1) * limit;
+    const where = { companyId };
 
-    const where = { companyId }
-
-    const [accounts, total] = await Promise.all([
-      this.prisma.accountingAccount.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { accountCode: "asc" },
-        include: {
-          company: {
-            select: { id: true, name: true, ruc: true },
+    try {
+      const [accounts, total] = await this.prisma.$transaction([
+        this.prisma.accountingAccount.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { accountCode: "asc" },
+          include: {
+            company: { select: { id: true, name: true, ruc: true } },
+            parentAccount: { select: { id: true, accountCode: true, accountName: true } },
+            childAccounts: { select: { id: true, accountCode: true, accountName: true, level: true }, orderBy: { accountCode: "asc" } },
+            _count: { select: { childAccounts: true, documentAccountLinks: true, documentLineAccountLinks: true, conciliationExpenses: true } },
           },
-          parentAccount: {
-            select: { id: true, accountCode: true, accountName: true },
-          },
-          childAccounts: {
-            select: { id: true, accountCode: true, accountName: true, level: true },
-            orderBy: { accountCode: "asc" },
-          },
-          _count: {
-            select: {
-              childAccounts: true,
-              documentAccountLinks: true,
-              documentLineAccountLinks: true,
-              conciliationExpenses: true,
-            },
-          },
-        },
-      }),
-      this.prisma.accountingAccount.count({ where }),
-    ])
-
-    const totalPages = Math.ceil(total / limit)
-
-    return {
-      data: accounts,
-      total,
-      page,
-      limit,
-      totalPages,
+        }),
+        this.prisma.accountingAccount.count({ where }),
+      ]);
+      this.logger.log(`Found ${total} accounting accounts for company ${companyId}`);
+      return { data: accounts, total, page, limit, totalPages: Math.ceil(total / limit) };
+    } catch (error) {
+      this.logger.error(`Error fetching accounting accounts for company ${companyId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException("Failed to fetch accounting accounts.");
     }
   }
 
   async createAccountingAccount(createAccountingAccountDto: CreateAccountingAccountDto): Promise<AccountingAccount> {
-    const { companyId, parentAccountId, ...accountData } = createAccountingAccountDto
+    const { companyId, parentAccountId, ...accountData } = createAccountingAccountDto;
+    this.logger.log(`Creating accounting account ${accountData.accountCode} for company ${companyId}`);
 
-    // Verify company exists
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-    })
-
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) {
-      throw new NotFoundException(`Company with ID ${companyId} not found`)
+      this.logger.warn(`Company not found: ${companyId}`);
+      throw new NotFoundException(`Company with ID ${companyId} not found`);
     }
 
-    // Check if account code already exists for this company
     const existingAccount = await this.prisma.accountingAccount.findUnique({
-      where: {
-        companyId_accountCode: {
-          companyId,
-          accountCode: accountData.accountCode,
-        },
-      },
-    })
-
+      where: { companyId_accountCode: { companyId, accountCode: accountData.accountCode } },
+    });
     if (existingAccount) {
-      throw new ConflictException(`Account with code ${accountData.accountCode} already exists for this company`)
+      this.logger.warn(`Accounting account code ${accountData.accountCode} already exists for company ${companyId}`);
+      throw new ConflictException(`Account with code ${accountData.accountCode} already exists for this company`);
     }
 
-    // Verify parent account exists and calculate level
-    let level = 1
+    let level = 1;
     if (parentAccountId) {
-      const parentAccount = await this.prisma.accountingAccount.findFirst({
-        where: {
-          id: parentAccountId,
-          companyId,
-        },
-      })
-
+      const parentAccount = await this.prisma.accountingAccount.findFirst({ where: { id: parentAccountId, companyId } });
       if (!parentAccount) {
-        throw new NotFoundException(`Parent account with ID ${parentAccountId} not found for this company`)
+        this.logger.warn(`Parent accounting account not found: ${parentAccountId} for company ${companyId}`);
+        throw new NotFoundException(`Parent account with ID ${parentAccountId} not found for this company`);
       }
-
-      level = parentAccount.level + 1
+      level = parentAccount.level + 1;
     }
 
-    const account = await this.prisma.accountingAccount.create({
-      data: {
-        ...accountData,
-        companyId,
-        parentAccountId,
-        level,
-      },
-      include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
+    try {
+      const account = await this.prisma.accountingAccount.create({
+        data: { ...accountData, companyId, parentAccountId, level },
+        include: {
+          company: { select: { id: true, name: true, ruc: true } },
+          parentAccount: { select: { id: true, accountCode: true, accountName: true } },
+          childAccounts: { select: { id: true, accountCode: true, accountName: true, level: true } },
         },
-        parentAccount: {
-          select: { id: true, accountCode: true, accountName: true },
-        },
-        childAccounts: {
-          select: { id: true, accountCode: true, accountName: true, level: true },
-        },
-      },
-    })
-
-    return account
+      });
+      this.logger.log(`Accounting account ${account.accountCode} created successfully with ID ${account.id}`);
+      return account;
+    } catch (error) {
+      this.logger.error(`Error creating accounting account ${accountData.accountCode} for company ${companyId}: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException("A database conflict occurred. This account code might already exist.");
+      }
+      throw new InternalServerErrorException("Failed to create accounting account.");
+    }
   }
 
   async getAccountingAccountById(id: string): Promise<AccountingAccount> {
+    this.logger.log(`Fetching accounting account by ID: ${id}`);
     const account = await this.prisma.accountingAccount.findUnique({
       where: { id },
       include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
-        parentAccount: {
-          select: { id: true, accountCode: true, accountName: true, level: true },
-        },
-        childAccounts: {
-          select: { id: true, accountCode: true, accountName: true, level: true },
-          orderBy: { accountCode: "asc" },
-        },
-        _count: {
-          select: {
-            childAccounts: true,
-            documentAccountLinks: true,
-            documentLineAccountLinks: true,
-            conciliationExpenses: true,
-          },
-        },
+        company: { select: { id: true, name: true, ruc: true } },
+        parentAccount: { select: { id: true, accountCode: true, accountName: true, level: true } },
+        childAccounts: { select: { id: true, accountCode: true, accountName: true, level: true }, orderBy: { accountCode: "asc" } },
+        _count: { select: { childAccounts: true, documentAccountLinks: true, documentLineAccountLinks: true, conciliationExpenses: true } },
       },
-    })
-
+    });
     if (!account) {
-      throw new NotFoundException(`Accounting account with ID ${id} not found`)
+      this.logger.warn(`Accounting account not found: ${id}`);
+      throw new NotFoundException(`Accounting account with ID ${id} not found`);
     }
-
-    return account
+    return account;
   }
 
   async updateAccountingAccount(
     id: string,
     updateAccountingAccountDto: UpdateAccountingAccountDto,
   ): Promise<AccountingAccount> {
-    const existingAccount = await this.prisma.accountingAccount.findUnique({
-      where: { id },
-    })
-
+    this.logger.log(`Updating accounting account: ${id}`);
+    const existingAccount = await this.prisma.accountingAccount.findUnique({ where: { id } });
     if (!existingAccount) {
-      throw new NotFoundException(`Accounting account with ID ${id} not found`)
+      this.logger.warn(`Accounting account not found for update: ${id}`);
+      throw new NotFoundException(`Accounting account with ID ${id} not found`);
     }
 
-    // Check for account code conflicts if being updated
-    if (
-      updateAccountingAccountDto.accountCode &&
-      updateAccountingAccountDto.accountCode !== existingAccount.accountCode
-    ) {
+    if (updateAccountingAccountDto.accountCode && updateAccountingAccountDto.accountCode !== existingAccount.accountCode) {
       const conflictingAccount = await this.prisma.accountingAccount.findUnique({
-        where: {
-          companyId_accountCode: {
-            companyId: existingAccount.companyId,
-            accountCode: updateAccountingAccountDto.accountCode,
-          },
-        },
-      })
-
+        where: { companyId_accountCode: { companyId: existingAccount.companyId, accountCode: updateAccountingAccountDto.accountCode } },
+      });
       if (conflictingAccount) {
-        throw new ConflictException(
-          `Account with code ${updateAccountingAccountDto.accountCode} already exists for this company`,
-        )
+        this.logger.warn(`Conflict: Account code ${updateAccountingAccountDto.accountCode} already exists for company ${existingAccount.companyId}`);
+        throw new ConflictException(`Account with code ${updateAccountingAccountDto.accountCode} already exists for this company`);
       }
     }
 
-    // Handle parent account change and level recalculation
-    let level = existingAccount.level
+    let level = existingAccount.level;
     if (updateAccountingAccountDto.parentAccountId !== undefined) {
       if (updateAccountingAccountDto.parentAccountId) {
-        // Prevent circular references
         if (updateAccountingAccountDto.parentAccountId === id) {
-          throw new BadRequestException("Account cannot be its own parent")
+          throw new BadRequestException("Account cannot be its own parent");
         }
-
         const parentAccount = await this.prisma.accountingAccount.findFirst({
-          where: {
-            id: updateAccountingAccountDto.parentAccountId,
-            companyId: existingAccount.companyId,
-          },
-        })
-
+          where: { id: updateAccountingAccountDto.parentAccountId, companyId: existingAccount.companyId },
+        });
         if (!parentAccount) {
-          throw new NotFoundException(`Parent account with ID ${updateAccountingAccountDto.parentAccountId} not found`)
+          throw new NotFoundException(`Parent account with ID ${updateAccountingAccountDto.parentAccountId} not found`);
         }
-
-        level = parentAccount.level + 1
+        level = parentAccount.level + 1;
       } else {
-        level = 1 // Root level
+        level = 1;
       }
     }
 
-    const account = await this.prisma.accountingAccount.update({
-      where: { id },
-      data: {
-        ...updateAccountingAccountDto,
-        level,
-        updatedAt: new Date(),
-      },
-      include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
+    try {
+      const account = await this.prisma.accountingAccount.update({
+        where: { id },
+        data: { ...updateAccountingAccountDto, level, updatedAt: new Date() },
+        include: {
+          company: { select: { id: true, name: true, ruc: true } },
+          parentAccount: { select: { id: true, accountCode: true, accountName: true } },
+          childAccounts: { select: { id: true, accountCode: true, accountName: true, level: true } },
         },
-        parentAccount: {
-          select: { id: true, accountCode: true, accountName: true },
-        },
-        childAccounts: {
-          select: { id: true, accountCode: true, accountName: true, level: true },
-        },
-      },
-    })
-
-    return account
+      });
+      this.logger.log(`Accounting account ${id} updated successfully.`);
+      return account;
+    } catch (error) {
+      this.logger.error(`Error updating accounting account ${id}: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`Accounting account with ID ${id} not found during update.`);
+      }
+      throw new InternalServerErrorException("Failed to update accounting account.");
+    }
   }
 
   async deleteAccountingAccount(id: string): Promise<void> {
+    this.logger.log(`Attempting to delete accounting account: ${id}`);
     const account = await this.prisma.accountingAccount.findUnique({
       where: { id },
-      include: {
-        _count: {
-          select: {
-            childAccounts: true,
-            documentAccountLinks: true,
-            documentLineAccountLinks: true,
-            conciliationExpenses: true,
-          },
-        },
-      },
-    })
-
+      include: { _count: { select: { childAccounts: true, documentAccountLinks: true, documentLineAccountLinks: true, conciliationExpenses: true } } },
+    });
     if (!account) {
-      throw new NotFoundException(`Accounting account with ID ${id} not found`)
+      this.logger.warn(`Accounting account not found for deletion: ${id}`);
+      throw new NotFoundException(`Accounting account with ID ${id} not found`);
     }
 
-    // Check if account has child accounts or is being used
     const hasRelatedRecords =
       account._count.childAccounts > 0 ||
       account._count.documentAccountLinks > 0 ||
       account._count.documentLineAccountLinks > 0 ||
-      account._count.conciliationExpenses > 0
-
+      account._count.conciliationExpenses > 0;
     if (hasRelatedRecords) {
-      throw new BadRequestException(
-        "Cannot delete account with child accounts or existing transactions. Consider deactivating instead.",
-      )
+      this.logger.warn(`Attempt to delete accounting account ${id} with related records.`);
+      throw new BadRequestException("Cannot delete account with child accounts or existing transactions. Consider deactivating instead.");
     }
 
-    await this.prisma.accountingAccount.delete({
-      where: { id },
-    })
+    try {
+      await this.prisma.accountingAccount.delete({ where: { id } });
+      this.logger.log(`Accounting account ${id} deleted successfully.`);
+    } catch (error) {
+      this.logger.error(`Error deleting accounting account ${id}: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`Accounting account with ID ${id} not found during deletion.`);
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+        throw new ConflictException(`Cannot delete account ${id} due to existing related records (foreign key constraint).`);
+      }
+      throw new InternalServerErrorException("Failed to delete accounting account.");
+    }
   }
 
   async getAccountingAccountHierarchy(companyId: string): Promise<AccountingAccount[]> {
-    return this.prisma.accountingAccount.findMany({
-      where: { companyId, isActive: true },
-      orderBy: { accountCode: "asc" },
-      include: {
-        childAccounts: {
-          where: { isActive: true },
-          orderBy: { accountCode: "asc" },
-          include: {
-            childAccounts: {
-              where: { isActive: true },
-              orderBy: { accountCode: "asc" },
-            },
+    this.logger.log(`Fetching accounting account hierarchy for company ${companyId}`);
+    try {
+      return await this.prisma.accountingAccount.findMany({
+        where: { companyId, isActive: true },
+        orderBy: { accountCode: "asc" },
+        include: {
+          childAccounts: {
+            where: { isActive: true },
+            orderBy: { accountCode: "asc" },
+            include: { childAccounts: { where: { isActive: true }, orderBy: { accountCode: "asc" } } },
           },
         },
-      },
-    })
+      });
+    } catch (error) {
+      this.logger.error(`Error fetching accounting account hierarchy for company ${companyId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException("Failed to fetch accounting account hierarchy.");
+    }
   }
 
   async searchAccountingAccounts(
@@ -307,9 +238,9 @@ export class AccountingService {
     searchTerm: string,
     pagination: PaginationDto,
   ): Promise<PaginatedResponse<AccountingAccount>> {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
-
+    this.logger.log(`Searching accounting accounts for company ${companyId} with term "${searchTerm}"`);
+    const { page = 1, limit = 10 } = pagination;
+    const skip = (page - 1) * limit;
     const where: Prisma.AccountingAccountWhereInput = {
       companyId,
       OR: [
@@ -318,31 +249,21 @@ export class AccountingService {
         { accountType: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
         { description: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
       ],
-    }
+    };
 
-    const [accounts, total] = await Promise.all([
-      this.prisma.accountingAccount.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { accountCode: "asc" },
-        include: {
-          parentAccount: {
-            select: { id: true, accountCode: true, accountName: true },
-          },
-        },
-      }),
-      this.prisma.accountingAccount.count({ where }),
-    ])
-
-    const totalPages = Math.ceil(total / limit)
-
-    return {
-      data: accounts,
-      total,
-      page,
-      limit,
-      totalPages,
+    try {
+      const [accounts, total] = await this.prisma.$transaction([
+        this.prisma.accountingAccount.findMany({
+          where, skip, take: limit, orderBy: { accountCode: "asc" },
+          include: { parentAccount: { select: { id: true, accountCode: true, accountName: true } } },
+        }),
+        this.prisma.accountingAccount.count({ where }),
+      ]);
+      this.logger.log(`Found ${total} accounting accounts matching search term "${searchTerm}" for company ${companyId}`);
+      return { data: accounts, total, page, limit, totalPages: Math.ceil(total / limit) };
+    } catch (error) {
+      this.logger.error(`Error searching accounting accounts for company ${companyId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException("Failed to search accounting accounts.");
     }
   }
 
@@ -351,274 +272,208 @@ export class AccountingService {
   // ============================================================================
 
   async fetchCostCenters(companyId: string, pagination: PaginationDto): Promise<PaginatedResponse<CostCenter>> {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
+    this.logger.log(`Fetching cost centers for company ${companyId} with pagination: ${JSON.stringify(pagination)}`);
+    const { page = 1, limit = 10 } = pagination;
+    const skip = (page - 1) * limit;
+    const where = { companyId };
 
-    const where = { companyId }
-
-    const [costCenters, total] = await Promise.all([
-      this.prisma.costCenter.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { code: "asc" },
-        include: {
-          company: {
-            select: { id: true, name: true, ruc: true },
+    try {
+      const [costCenters, total] = await this.prisma.$transaction([
+        this.prisma.costCenter.findMany({
+          where, skip, take: limit, orderBy: { code: "asc" },
+          include: {
+            company: { select: { id: true, name: true, ruc: true } },
+            parentCostCenter: { select: { id: true, code: true, name: true } },
+            childCostCenters: { select: { id: true, code: true, name: true, level: true }, orderBy: { code: "asc" } },
+            _count: { select: { childCostCenters: true, documentCostCenterLinks: true, documentLineCostCenterLinks: true } },
           },
-          parentCostCenter: {
-            select: { id: true, code: true, name: true },
-          },
-          childCostCenters: {
-            select: { id: true, code: true, name: true, level: true },
-            orderBy: { code: "asc" },
-          },
-          _count: {
-            select: {
-              childCostCenters: true,
-              documentCostCenterLinks: true,
-              documentLineCostCenterLinks: true,
-            },
-          },
-        },
-      }),
-      this.prisma.costCenter.count({ where }),
-    ])
-
-    const totalPages = Math.ceil(total / limit)
-
-    return {
-      data: costCenters,
-      total,
-      page,
-      limit,
-      totalPages,
+        }),
+        this.prisma.costCenter.count({ where }),
+      ]);
+      this.logger.log(`Found ${total} cost centers for company ${companyId}`);
+      return { data: costCenters, total, page, limit, totalPages: Math.ceil(total / limit) };
+    } catch (error) {
+      this.logger.error(`Error fetching cost centers for company ${companyId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException("Failed to fetch cost centers.");
     }
   }
 
   async createCostCenter(createCostCenterDto: CreateCostCenterDto): Promise<CostCenter> {
-    const { companyId, parentCostCenterId, ...costCenterData } = createCostCenterDto
+    const { companyId, parentCostCenterId, ...costCenterData } = createCostCenterDto;
+    this.logger.log(`Creating cost center ${costCenterData.code} for company ${companyId}`);
 
-    // Verify company exists
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-    })
-
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) {
-      throw new NotFoundException(`Company with ID ${companyId} not found`)
+      this.logger.warn(`Company not found: ${companyId}`);
+      throw new NotFoundException(`Company with ID ${companyId} not found`);
     }
 
-    // Check if cost center code already exists for this company
     const existingCostCenter = await this.prisma.costCenter.findUnique({
-      where: {
-        companyId_code: {
-          companyId,
-          code: costCenterData.code,
-        },
-      },
-    })
-
+      where: { companyId_code: { companyId, code: costCenterData.code } },
+    });
     if (existingCostCenter) {
-      throw new ConflictException(`Cost center with code ${costCenterData.code} already exists for this company`)
+      this.logger.warn(`Cost center code ${costCenterData.code} already exists for company ${companyId}`);
+      throw new ConflictException(`Cost center with code ${costCenterData.code} already exists for this company`);
     }
 
-    // Verify parent cost center exists and calculate level
-    let level = 1
+    let level = 1;
     if (parentCostCenterId) {
-      const parentCostCenter = await this.prisma.costCenter.findFirst({
-        where: {
-          id: parentCostCenterId,
-          companyId,
-        },
-      })
-
+      const parentCostCenter = await this.prisma.costCenter.findFirst({ where: { id: parentCostCenterId, companyId } });
       if (!parentCostCenter) {
-        throw new NotFoundException(`Parent cost center with ID ${parentCostCenterId} not found for this company`)
+        this.logger.warn(`Parent cost center not found: ${parentCostCenterId} for company ${companyId}`);
+        throw new NotFoundException(`Parent cost center with ID ${parentCostCenterId} not found for this company`);
       }
-
-      level = parentCostCenter.level + 1
+      level = parentCostCenter.level + 1;
     }
 
-    const costCenter = await this.prisma.costCenter.create({
-      data: {
-        ...costCenterData,
-        companyId,
-        parentCostCenterId,
-        level,
-      },
-      include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
+    try {
+      const costCenter = await this.prisma.costCenter.create({
+        data: { ...costCenterData, companyId, parentCostCenterId, level },
+        include: {
+          company: { select: { id: true, name: true, ruc: true } },
+          parentCostCenter: { select: { id: true, code: true, name: true } },
+          childCostCenters: { select: { id: true, code: true, name: true, level: true } },
         },
-        parentCostCenter: {
-          select: { id: true, code: true, name: true },
-        },
-        childCostCenters: {
-          select: { id: true, code: true, name: true, level: true },
-        },
-      },
-    })
-
-    return costCenter
+      });
+      this.logger.log(`Cost center ${costCenter.code} created successfully with ID ${costCenter.id}`);
+      return costCenter;
+    } catch (error) {
+      this.logger.error(`Error creating cost center ${costCenterData.code} for company ${companyId}: ${error.message}`, error.stack);
+       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException("A database conflict occurred. This cost center code might already exist.");
+      }
+      throw new InternalServerErrorException("Failed to create cost center.");
+    }
   }
 
   async getCostCenterById(id: string): Promise<CostCenter> {
+    this.logger.log(`Fetching cost center by ID: ${id}`);
     const costCenter = await this.prisma.costCenter.findUnique({
       where: { id },
       include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
-        },
-        parentCostCenter: {
-          select: { id: true, code: true, name: true, level: true },
-        },
-        childCostCenters: {
-          select: { id: true, code: true, name: true, level: true },
-          orderBy: { code: "asc" },
-        },
-        _count: {
-          select: {
-            childCostCenters: true,
-            documentCostCenterLinks: true,
-            documentLineCostCenterLinks: true,
-          },
-        },
+        company: { select: { id: true, name: true, ruc: true } },
+        parentCostCenter: { select: { id: true, code: true, name: true, level: true } },
+        childCostCenters: { select: { id: true, code: true, name: true, level: true }, orderBy: { code: "asc" } },
+        _count: { select: { childCostCenters: true, documentCostCenterLinks: true, documentLineCostCenterLinks: true } },
       },
-    })
-
+    });
     if (!costCenter) {
-      throw new NotFoundException(`Cost center with ID ${id} not found`)
+      this.logger.warn(`Cost center not found: ${id}`);
+      throw new NotFoundException(`Cost center with ID ${id} not found`);
     }
-
-    return costCenter
+    return costCenter;
   }
 
   async updateCostCenter(id: string, updateCostCenterDto: UpdateCostCenterDto): Promise<CostCenter> {
-    const existingCostCenter = await this.prisma.costCenter.findUnique({
-      where: { id },
-    })
-
+    this.logger.log(`Updating cost center: ${id}`);
+    const existingCostCenter = await this.prisma.costCenter.findUnique({ where: { id } });
     if (!existingCostCenter) {
-      throw new NotFoundException(`Cost center with ID ${id} not found`)
+      this.logger.warn(`Cost center not found for update: ${id}`);
+      throw new NotFoundException(`Cost center with ID ${id} not found`);
     }
 
-    // Check for code conflicts if being updated
     if (updateCostCenterDto.code && updateCostCenterDto.code !== existingCostCenter.code) {
       const conflictingCostCenter = await this.prisma.costCenter.findUnique({
-        where: {
-          companyId_code: {
-            companyId: existingCostCenter.companyId,
-            code: updateCostCenterDto.code,
-          },
-        },
-      })
-
+        where: { companyId_code: { companyId: existingCostCenter.companyId, code: updateCostCenterDto.code } },
+      });
       if (conflictingCostCenter) {
-        throw new ConflictException(`Cost center with code ${updateCostCenterDto.code} already exists for this company`)
+        this.logger.warn(`Conflict: Cost center code ${updateCostCenterDto.code} already exists for company ${existingCostCenter.companyId}`);
+        throw new ConflictException(`Cost center with code ${updateCostCenterDto.code} already exists for this company`);
       }
     }
 
-    // Handle parent cost center change and level recalculation
-    let level = existingCostCenter.level
+    let level = existingCostCenter.level;
     if (updateCostCenterDto.parentCostCenterId !== undefined) {
       if (updateCostCenterDto.parentCostCenterId) {
-        // Prevent circular references
         if (updateCostCenterDto.parentCostCenterId === id) {
-          throw new BadRequestException("Cost center cannot be its own parent")
+          throw new BadRequestException("Cost center cannot be its own parent");
         }
-
         const parentCostCenter = await this.prisma.costCenter.findFirst({
-          where: {
-            id: updateCostCenterDto.parentCostCenterId,
-            companyId: existingCostCenter.companyId,
-          },
-        })
-
+          where: { id: updateCostCenterDto.parentCostCenterId, companyId: existingCostCenter.companyId },
+        });
         if (!parentCostCenter) {
-          throw new NotFoundException(`Parent cost center with ID ${updateCostCenterDto.parentCostCenterId} not found`)
+          throw new NotFoundException(`Parent cost center with ID ${updateCostCenterDto.parentCostCenterId} not found`);
         }
-
-        level = parentCostCenter.level + 1
+        level = parentCostCenter.level + 1;
       } else {
-        level = 1 // Root level
+        level = 1;
       }
     }
 
-    const costCenter = await this.prisma.costCenter.update({
-      where: { id },
-      data: {
-        ...updateCostCenterDto,
-        level,
-        updatedAt: new Date(),
-      },
-      include: {
-        company: {
-          select: { id: true, name: true, ruc: true },
+    try {
+      const costCenter = await this.prisma.costCenter.update({
+        where: { id },
+        data: { ...updateCostCenterDto, level, updatedAt: new Date() },
+        include: {
+          company: { select: { id: true, name: true, ruc: true } },
+          parentCostCenter: { select: { id: true, code: true, name: true } },
+          childCostCenters: { select: { id: true, code: true, name: true, level: true } },
         },
-        parentCostCenter: {
-          select: { id: true, code: true, name: true },
-        },
-        childCostCenters: {
-          select: { id: true, code: true, name: true, level: true },
-        },
-      },
-    })
-
-    return costCenter
+      });
+      this.logger.log(`Cost center ${id} updated successfully.`);
+      return costCenter;
+    } catch (error) {
+      this.logger.error(`Error updating cost center ${id}: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`Cost center with ID ${id} not found during update.`);
+      }
+      throw new InternalServerErrorException("Failed to update cost center.");
+    }
   }
 
   async deleteCostCenter(id: string): Promise<void> {
+    this.logger.log(`Attempting to delete cost center: ${id}`);
     const costCenter = await this.prisma.costCenter.findUnique({
       where: { id },
-      include: {
-        _count: {
-          select: {
-            childCostCenters: true,
-            documentCostCenterLinks: true,
-            documentLineCostCenterLinks: true,
-          },
-        },
-      },
-    })
-
+      include: { _count: { select: { childCostCenters: true, documentCostCenterLinks: true, documentLineCostCenterLinks: true } } },
+    });
     if (!costCenter) {
-      throw new NotFoundException(`Cost center with ID ${id} not found`)
+      this.logger.warn(`Cost center not found for deletion: ${id}`);
+      throw new NotFoundException(`Cost center with ID ${id} not found`);
     }
 
-    // Check if cost center has child cost centers or is being used
     const hasRelatedRecords =
       costCenter._count.childCostCenters > 0 ||
       costCenter._count.documentCostCenterLinks > 0 ||
-      costCenter._count.documentLineCostCenterLinks > 0
-
+      costCenter._count.documentLineCostCenterLinks > 0;
     if (hasRelatedRecords) {
-      throw new BadRequestException(
-        "Cannot delete cost center with child cost centers or existing transactions. Consider deactivating instead.",
-      )
+      this.logger.warn(`Attempt to delete cost center ${id} with related records.`);
+      throw new BadRequestException("Cannot delete cost center with child cost centers or existing transactions. Consider deactivating instead.");
     }
 
-    await this.prisma.costCenter.delete({
-      where: { id },
-    })
+    try {
+      await this.prisma.costCenter.delete({ where: { id } });
+      this.logger.log(`Cost center ${id} deleted successfully.`);
+    } catch (error) {
+      this.logger.error(`Error deleting cost center ${id}: ${error.message}`, error.stack);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundException(`Cost center with ID ${id} not found during deletion.`);
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+         throw new ConflictException(`Cannot delete cost center ${id} due to existing related records (foreign key constraint).`);
+      }
+      throw new InternalServerErrorException("Failed to delete cost center.");
+    }
   }
 
   async getCostCenterHierarchy(companyId: string): Promise<CostCenter[]> {
-    return this.prisma.costCenter.findMany({
-      where: { companyId, isActive: true },
-      orderBy: { code: "asc" },
-      include: {
-        childCostCenters: {
-          where: { isActive: true },
-          orderBy: { code: "asc" },
-          include: {
-            childCostCenters: {
-              where: { isActive: true },
-              orderBy: { code: "asc" },
-            },
+    this.logger.log(`Fetching cost center hierarchy for company ${companyId}`);
+    try {
+      return await this.prisma.costCenter.findMany({
+        where: { companyId, isActive: true },
+        orderBy: { code: "asc" },
+        include: {
+          childCostCenters: {
+            where: { isActive: true },
+            orderBy: { code: "asc" },
+            include: { childCostCenters: { where: { isActive: true }, orderBy: { code: "asc" } } },
           },
         },
-      },
-    })
+      });
+    } catch (error) {
+        this.logger.error(`Error fetching cost center hierarchy for company ${companyId}: ${error.message}`, error.stack);
+        throw new InternalServerErrorException("Failed to fetch cost center hierarchy.");
+    }
   }
 
   async searchCostCenters(
@@ -626,9 +481,9 @@ export class AccountingService {
     searchTerm: string,
     pagination: PaginationDto,
   ): Promise<PaginatedResponse<CostCenter>> {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
-
+    this.logger.log(`Searching cost centers for company ${companyId} with term "${searchTerm}"`);
+    const { page = 1, limit = 10 } = pagination;
+    const skip = (page - 1) * limit;
     const where: Prisma.CostCenterWhereInput = {
       companyId,
       OR: [
@@ -636,31 +491,21 @@ export class AccountingService {
         { name: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
         { description: { contains: searchTerm, mode: Prisma.QueryMode.insensitive } },
       ],
-    }
+    };
 
-    const [costCenters, total] = await Promise.all([
-      this.prisma.costCenter.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { code: "asc" },
-        include: {
-          parentCostCenter: {
-            select: { id: true, code: true, name: true },
-          },
-        },
-      }),
-      this.prisma.costCenter.count({ where }),
-    ])
-
-    const totalPages = Math.ceil(total / limit)
-
-    return {
-      data: costCenters,
-      total,
-      page,
-      limit,
-      totalPages,
+    try {
+      const [costCenters, total] = await this.prisma.$transaction([
+        this.prisma.costCenter.findMany({
+          where, skip, take: limit, orderBy: { code: "asc" },
+          include: { parentCostCenter: { select: { id: true, code: true, name: true } } },
+        }),
+        this.prisma.costCenter.count({ where }),
+      ]);
+      this.logger.log(`Found ${total} cost centers matching search term "${searchTerm}" for company ${companyId}`);
+      return { data: costCenters, total, page, limit, totalPages: Math.ceil(total / limit) };
+    } catch (error) {
+      this.logger.error(`Error searching cost centers for company ${companyId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException("Failed to search cost centers.");
     }
   }
 }
