@@ -306,11 +306,11 @@ export class DocumentsService {
 
     return {
       data: documents.map((doc) => this.mapToResponseDto(doc)),
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-      
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+
     }
   }
 
