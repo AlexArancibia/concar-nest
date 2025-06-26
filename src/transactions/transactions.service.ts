@@ -1,85 +1,112 @@
-import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
-import { CreateTransactionDto } from "./dto/create-transaction.dto";
-import { UpdateTransactionDto } from "./dto/update-transaction.dto";
-import { PaginatedResponse } from "../common/dto/pagination.dto";
-import { Transaction, TransactionStatus, Prisma } from "@prisma/client";
-import { createHash } from "crypto";
-import { TransactionFiltersDto } from "./dto/transaction-filters.dto";
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common"
+import  { PrismaService } from "../prisma/prisma.service"
+import  { CreateTransactionDto } from "./dto/create-transaction.dto"
+import  { UpdateTransactionDto } from "./dto/update-transaction.dto"
+import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
+import  { Prisma, Transaction, TransactionStatus } from "@prisma/client"
+import { createHash } from "crypto"
+import { TransactionQueryDto } from "./dto/transaction-query.dto"
 
 @Injectable()
 export class TransactionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async fetchTransactions(companyId: string, filters: TransactionFiltersDto): Promise<PaginatedResponse<Transaction>> {
-    const {
-      page = 1,
-      limit = 10,
-      status,
-      transactionType,
-      dateFrom,
-      dateTo,
-      minAmount,
-      maxAmount,
-      search,
-      bankAccountId,
-    } = filters;
-    const skip = (page - 1) * limit;
+ async fetchTransactions(
+  companyId: string,
+  transactionQueryDto: TransactionQueryDto
+): Promise<PaginatedResponse<Transaction>> {
+  const {
+    page = 1,
+    limit = 10,
+    status,
+    type,
+    dateFrom,
+    dateTo,
+    search,
+    bankAccountId,
+    minAmount,
+    maxAmount,
+    reference,
+    operationNumber,
+    channel
+  } = transactionQueryDto;
 
-    const where: Prisma.TransactionWhereInput = {
-      companyId,
-      ...(status && { status }),
-      ...(transactionType && { transactionType }),
-      ...(bankAccountId && { bankAccountId }),
-      ...((dateFrom || dateTo) && {
-        transactionDate: {
-          ...(dateFrom && { gte: new Date(dateFrom) }),
-          ...(dateTo && { lte: new Date(dateTo) }),
-        },
-      }),
-      ...((minAmount !== undefined || maxAmount !== undefined) && {
-        amount: {
-          ...(minAmount !== undefined && { gte: minAmount }),
-          ...(maxAmount !== undefined && { lte: maxAmount }),
-        },
-      }),
-      ...(search && {
-        OR: [
-          { description: { contains: search, mode: "insensitive" } },
-          { reference: { contains: search, mode: "insensitive" } },
-          { operationNumber: { contains: search, mode: "insensitive" } },
-        ],
-      }),
-    };
+  const skip = (page - 1) * limit;
+  const where: Prisma.TransactionWhereInput = { companyId };
 
-    const [transactions, total] = await Promise.all([
-      this.prisma.transaction.findMany({
-        where,
-        include: {
-          bankAccount: {
-            include: {
-              bank: true,
-              currencyRef: true,
-            },
-          },
-        },
-        orderBy: { transactionDate: "desc" },
-        skip,
-        take: limit,
-      }),
-      this.prisma.transaction.count({
-        where,
-      }),
-    ]);
+  // Filtros directos
+  if (status) where.status = status;
+  if (type) where.transactionType = type;
+  if (bankAccountId) where.bankAccountId = bankAccountId;
+  if (reference) where.reference = { contains: reference, mode: 'insensitive' };
+  if (operationNumber) where.operationNumber = operationNumber;
+  if (channel) where.channel = channel;
 
-    return {
-      data: transactions,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
+  // Filtros de rango
+  if (dateFrom || dateTo) {
+    where.transactionDate = {
+      ...(dateFrom && { gte: new Date(dateFrom) }),
+      ...(dateTo && { lte: new Date(dateTo) })
     };
   }
+
+  if (minAmount || maxAmount) {
+    where.amount = {
+      ...(minAmount && { gte: new Prisma.Decimal(minAmount) }),
+      ...(maxAmount && { lte: new Prisma.Decimal(maxAmount) })
+    };
+  }
+
+  // Búsqueda textual global
+  if (search) {
+    where.OR = [
+      { description: { contains: search, mode: 'insensitive' } },
+      { reference: { contains: search, mode: 'insensitive' } },
+      { operationNumber: { contains: search, mode: 'insensitive' } },
+      { branch: { contains: search, mode: 'insensitive' } },
+      { fileName: { contains: search, mode: 'insensitive' } }
+    ];
+  }
+
+  const [transactions, total] = await Promise.all([
+    this.prisma.transaction.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        bankAccount: {
+          include: {
+            bank: {
+              select: {
+                name: true,
+                code: true,
+              }
+            },
+            currencyRef: {
+              select: {
+                code: true,
+                symbol: true,
+              }
+            }
+          }
+        }
+      },
+      orderBy: [
+        { transactionDate: 'desc' },
+        { createdAt: 'desc' }
+      ]
+    }),
+    this.prisma.transaction.count({ where })
+  ]);
+
+  return {
+    data: transactions,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit)
+  };
+}
 
   async createTransaction(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
     const { companyId, bankAccountId, transactionDate, description, transactionType, amount, balance, ...otherFields } =

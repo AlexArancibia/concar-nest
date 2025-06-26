@@ -6,86 +6,229 @@ import { CreateConciliationItemDto } from "./dto/create-conciliation-item.dto"
 import { UpdateConciliationItemDto } from "./dto/update-conciliation-item.dto"
 import { CreateConciliationExpenseDto } from "./dto/create-conciliation-expense.dto"
 import { UpdateConciliationExpenseDto } from "./dto/update-conciliation-expense.dto"
-import { PaginationDto } from "../common/dto/pagination.dto"
 import { ConciliationFiltersDto } from "./dto/conciliation-filters.dto"
 import { ConciliationStatus, ConciliationItemStatus } from "@prisma/client"
+import { ConciliationQueryDto } from "./dto/conciliation-query.dto"
 
 @Injectable()
 export class ConciliationsService {
   constructor(private prisma: PrismaService) {}
 
   // Conciliation CRUD operations
-  async fetchConciliations(companyId: string, pagination: PaginationDto) {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
+  async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQueryDto) {
+  const {
+    page = 1,
+    limit = 10,
+    status,
+    type,
+    dateFrom,
+    dateTo,
+    periodFrom,
+    periodTo,
+    search,
+    bankAccountId,
+    minDifference,
+    maxDifference,
+    minBankBalance,
+    maxBankBalance,
+    createdById,
+    approvedById,
+    hasTransaction,
+  } = conciliationQueryDto;
 
-    const where = {
-      companyId,
+  const skip = (page - 1) * limit;
+
+  const where: any = {
+    companyId,
+  };
+
+  // Status filter
+  if (status) {
+    where.status = status;
+  }
+
+  // Type filter
+  if (type) {
+    where.type = type;
+  }
+
+  // Date range filter (createdAt)
+  if (dateFrom && dateTo) {
+    where.createdAt = {
+      gte: new Date(dateFrom),
+      lte: new Date(dateTo),
+    };
+  } else if (dateFrom) {
+    where.createdAt = {
+      gte: new Date(dateFrom),
+    };
+  } else if (dateTo) {
+    where.createdAt = {
+      lte: new Date(dateTo),
+    };
+  }
+
+  // Period range filter (periodStart and periodEnd)
+  if (periodFrom && periodTo) {
+    where.OR = [
+      {
+        periodStart: {
+          lte: new Date(periodTo),
+        },
+        periodEnd: {
+          gte: new Date(periodFrom),
+        },
+      },
+      {
+        periodStart: {
+          gte: new Date(periodFrom),
+          lte: new Date(periodTo),
+        },
+      },
+      {
+        periodEnd: {
+          gte: new Date(periodFrom),
+          lte: new Date(periodTo),
+        },
+      },
+    ];
+  } else if (periodFrom) {
+    where.periodStart = {
+      gte: new Date(periodFrom),
+    };
+  } else if (periodTo) {
+    where.periodEnd = {
+      lte: new Date(periodTo),
+    };
+  }
+
+  // Search filter
+  if (search) {
+    where.OR = [
+      { reference: { contains: search, mode: "insensitive" } },
+      { notes: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  // Bank account filter
+  if (bankAccountId) {
+    where.bankAccountId = bankAccountId;
+  }
+
+  // Difference range filter
+  if (minDifference && maxDifference) {
+    where.difference = {
+      gte: parseFloat(minDifference),
+      lte: parseFloat(maxDifference),
+    };
+  } else if (minDifference) {
+    where.difference = {
+      gte: parseFloat(minDifference),
+    };
+  } else if (maxDifference) {
+    where.difference = {
+      lte: parseFloat(maxDifference),
+    };
+  }
+
+  // Bank balance range filter
+  if (minBankBalance && maxBankBalance) {
+    where.bankBalance = {
+      gte: parseFloat(minBankBalance),
+      lte: parseFloat(maxBankBalance),
+    };
+  } else if (minBankBalance) {
+    where.bankBalance = {
+      gte: parseFloat(minBankBalance),
+    };
+  } else if (maxBankBalance) {
+    where.bankBalance = {
+      lte: parseFloat(maxBankBalance),
+    };
+  }
+
+  // Created by filter
+  if (createdById) {
+    where.createdById = createdById;
+  }
+
+  // Approved by filter
+  if (approvedById) {
+    where.approvedById = approvedById;
+  }
+
+  // Has transaction filter
+  if (hasTransaction !== undefined) {
+    if (hasTransaction) {
+      where.transactionId = { not: null };
+    } else {
+      where.transactionId = null;
     }
+  }
 
-    const [conciliations, total] = await Promise.all([
-      this.prisma.conciliation.findMany({
-        where,
-        skip,
-        take: limit,
-        include: {
-          bankAccount: {
-            select: {
-              id: true,
-              accountNumber: true,
-              alias: true,
-              bank: {
-                select: {
-                  name: true,
-                  code: true,
-                },
+  const [conciliations, total] = await Promise.all([
+    this.prisma.conciliation.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        bankAccount: {
+          select: {
+            id: true,
+            accountNumber: true,
+            alias: true,
+            bank: {
+              select: {
+                name: true,
+                code: true,
               },
             },
           },
-          transaction: {
-            select: {
-              id: true,
-              description: true,
-              amount: true,
-              transactionDate: true,
-            },
-          },
-          createdBy: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-          approvedBy: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-          _count: {
-            select: {
-              items: true,
-              expenses: true,
-            },
+        },
+        transaction: {
+          select: {
+            id: true,
+            description: true,
+            amount: true,
+            transactionDate: true,
           },
         },
-        orderBy: { createdAt: "desc" },
-      }),
-      this.prisma.conciliation.count({ where }),
-    ])
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        _count: {
+          select: {
+            items: true,
+            expenses: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    this.prisma.conciliation.count({ where }),
+  ]);
 
-    return {
-      data: conciliations,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    }
-  }
+  return {
+    data: conciliations,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
+}
 
   async createConciliation(createConciliationDto: CreateConciliationDto) {
     const { expenses, ...conciliationData } = createConciliationDto
