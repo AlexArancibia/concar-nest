@@ -27,7 +27,7 @@ export class DocumentsService {
       ...documentData
     } = createDocumentDto
 
-    // Generate full number
+    // Generate full 33
     const fullNumber = `${documentData.series}-${documentData.number}`
     this.logger.log(`Generated full number: ${fullNumber}`)
 
