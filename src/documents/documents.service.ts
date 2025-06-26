@@ -14,7 +14,7 @@ export class DocumentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createDocument(createDocumentDto: CreateDocumentDto): Promise<DocumentResponseDto> {
-    this.logger.log(`Creating document: ${createDocumentDto.series}-${createDocumentDto.number}`)
+    this.logger.log(`Creating document:  ${createDocumentDto.series}-${createDocumentDto.number}`)
 
     const {
       lines,
