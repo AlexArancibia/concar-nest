@@ -1,22 +1,60 @@
-import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common"
-import  { PrismaService } from "../prisma/prisma.service"
-import  { CreateTransactionDto } from "./dto/create-transaction.dto"
-import  { UpdateTransactionDto } from "./dto/update-transaction.dto"
-import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import  { Transaction, TransactionStatus } from "@prisma/client"
-import { createHash } from "crypto"
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateTransactionDto } from "./dto/create-transaction.dto";
+import { UpdateTransactionDto } from "./dto/update-transaction.dto";
+import { PaginatedResponse } from "../common/dto/pagination.dto";
+import { Transaction, TransactionStatus, Prisma } from "@prisma/client";
+import { createHash } from "crypto";
+import { TransactionFiltersDto } from "./dto/transaction-filters.dto";
 
 @Injectable()
 export class TransactionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async fetchTransactions(companyId: string, pagination: PaginationDto): Promise<PaginatedResponse<Transaction>> {
-    const { page = 1, limit = 10 } = pagination
-    const skip = (page - 1) * limit
+  async fetchTransactions(companyId: string, filters: TransactionFiltersDto): Promise<PaginatedResponse<Transaction>> {
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      transactionType,
+      dateFrom,
+      dateTo,
+      minAmount,
+      maxAmount,
+      search,
+      bankAccountId,
+    } = filters;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.TransactionWhereInput = {
+      companyId,
+      ...(status && { status }),
+      ...(transactionType && { transactionType }),
+      ...(bankAccountId && { bankAccountId }),
+      ...((dateFrom || dateTo) && {
+        transactionDate: {
+          ...(dateFrom && { gte: new Date(dateFrom) }),
+          ...(dateTo && { lte: new Date(dateTo) }),
+        },
+      }),
+      ...((minAmount !== undefined || maxAmount !== undefined) && {
+        amount: {
+          ...(minAmount !== undefined && { gte: minAmount }),
+          ...(maxAmount !== undefined && { lte: maxAmount }),
+        },
+      }),
+      ...(search && {
+        OR: [
+          { description: { contains: search, mode: "insensitive" } },
+          { reference: { contains: search, mode: "insensitive" } },
+          { operationNumber: { contains: search, mode: "insensitive" } },
+        ],
+      }),
+    };
 
     const [transactions, total] = await Promise.all([
       this.prisma.transaction.findMany({
-        where: { companyId },
+        where,
         include: {
           bankAccount: {
             include: {
@@ -30,9 +68,9 @@ export class TransactionsService {
         take: limit,
       }),
       this.prisma.transaction.count({
-        where: { companyId },
+        where,
       }),
-    ])
+    ]);
 
     return {
       data: transactions,
@@ -40,7 +78,7 @@ export class TransactionsService {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
-    }
+    };
   }
 
   async createTransaction(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
