@@ -968,6 +968,8 @@ model SunatRhe {
   currencyRef Currency @relation(fields: [currency], references: [code])
   company     Company  @relation(fields: [companyId], references: [id])
   user        User     @relation(fields: [userId], references: [id])
+  @@unique([documentType, documentNumber, issuerRuc, issueDate], name: "unique_rhe_document")
+
 
   @@map("sunat_rhe")
 }
@@ -1025,6 +1027,7 @@ model SunatInvoice {
   currencyRef Currency @relation(fields: [currency], references: [code])
   company     Company  @relation(fields: [companyId], references: [id])
   user        User     @relation(fields: [userId], references: [id])
+  @@unique([ruc, documentType, series, documentNumber], name: "unique_invoice_document")
 
   @@map("sunat_invoices")
 }
