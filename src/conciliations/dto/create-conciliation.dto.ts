@@ -90,6 +90,11 @@ export class CreateConciliationDto {
 
   @IsOptional()
   @IsArray()
+  @IsString({ each: true })
+  detractionIds?: string[];
+
+  @IsOptional()
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateConciliationExpenseDto)
   expenses?: CreateConciliationExpenseDto[]

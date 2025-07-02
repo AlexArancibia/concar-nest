@@ -26,13 +26,13 @@ export class CreateConciliationItemDto {
   @IsNumber()
   distributionPercentage?: number = 100
 
-  @IsOptional()
-  @IsNumber()
-  detractionAmount?: number = 0
+  // @IsOptional()
+  // @IsNumber()
+  // detractionAmount?: number = 0
 
-  @IsOptional()
-  @IsNumber()
-  retentionAmount?: number = 0
+  // @IsOptional()
+  // @IsNumber()
+  // retentionAmount?: number = 0
 
   @IsOptional()
   @IsEnum(ConciliationItemStatus)

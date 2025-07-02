@@ -1,6 +1,6 @@
 import { PartialType } from "@nestjs/mapped-types"
 import { CreateConciliationDto } from "./create-conciliation.dto"
-import { IsOptional, IsDateString, IsEnum, IsNumber } from "class-validator"
+import { IsOptional, IsDateString, IsEnum, IsNumber, IsArray, IsString } from "class-validator"
 import { ConciliationStatus } from "@prisma/client"
 
 export class UpdateConciliationDto extends PartialType(CreateConciliationDto) {
@@ -35,6 +35,11 @@ export class UpdateConciliationDto extends PartialType(CreateConciliationDto) {
   @IsOptional()
   @IsEnum(ConciliationStatus)
   status?: ConciliationStatus
+
+  // @IsOptional()
+  // @IsArray()
+  // @IsString({ each: true })
+  //   detractionIds?: string[];
 
   @IsOptional()
   @IsDateString()

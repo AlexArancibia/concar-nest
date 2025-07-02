@@ -559,8 +559,8 @@ model DocumentDetraction {
   paymentDate                DateTime?
   paymentReference           String?
   isConciliated              Boolean  @default(false)
-  conciliatedAmount          Decimal  @default(0) @db.Decimal(15, 2)
-  pendingAmount              Decimal  @default(0) @db.Decimal(15, 2)
+  // conciliatedAmount          Decimal  @default(0) @db.Decimal(15, 2)
+  // pendingAmount              Decimal  @default(0) @db.Decimal(15, 2)
   conciliationId             String?
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
@@ -796,8 +796,8 @@ model ConciliationItem {
   conciliatedAmount      Decimal                   @db.Decimal(15, 2)
   difference             Decimal                   @db.Decimal(15, 2)
   distributionPercentage Decimal                   @default(100) @db.Decimal(5, 4)
-  detractionAmount       Decimal                   @default(0) @db.Decimal(15, 2)
-  retentionAmount        Decimal                   @default(0) @db.Decimal(15, 2)
+  // detractionAmount       Decimal                   @default(0) @db.Decimal(15, 2)
+  // retentionAmount        Decimal                   @default(0) @db.Decimal(15, 2)
   status                 ConciliationItemStatus    @default(PENDING)
   notes                  String?
   systemNotes            String?

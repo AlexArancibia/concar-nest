@@ -7,7 +7,7 @@ import { UpdateConciliationItemDto } from "./dto/update-conciliation-item.dto"
 import { CreateConciliationExpenseDto } from "./dto/create-conciliation-expense.dto"
 import { UpdateConciliationExpenseDto } from "./dto/update-conciliation-expense.dto"
 import { ConciliationFiltersDto } from "./dto/conciliation-filters.dto"
-import { ConciliationStatus, ConciliationItemStatus } from "@prisma/client"
+import { ConciliationStatus, ConciliationItemStatus, ConciliationType } from "@prisma/client"
 import { ConciliationQueryDto } from "./dto/conciliation-query.dto"
 
 @Injectable()
@@ -15,7 +15,7 @@ export class ConciliationsService {
   constructor(private prisma: PrismaService) {}
 
   // Conciliation CRUD operations
-  async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQueryDto) {
+async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQueryDto) {
   const {
     page = 1,
     limit = 10,
@@ -215,23 +215,65 @@ export class ConciliationsService {
             expenses: true,
           },
         },
+        // Nueva sección para incluir información de detracciones
+        documentDetractions: {
+          select: {
+            id: true,
+            amount: true,
+            code: true,
+            document: {
+              select: {
+                id: true,
+                fullNumber: true,
+                issueDate: true,
+                total: true,
+                currency: true,
+                supplier: {
+                  select: {
+                    id: true,
+                    businessName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     }),
     this.prisma.conciliation.count({ where }),
   ]);
 
+  // Enriquecer los datos de las conciliaciones con información resumida
+  const enrichedConciliations = conciliations.map(conciliation => {
+    // Calcular el total de detracciones
+    const detractionTotal = conciliation.documentDetractions.reduce(
+      (sum, detraction) => sum + detraction.amount.toNumber(),
+      0
+    );
+
+    // Obtener IDs de documentos asociados a detracciones
+    const documentIds = conciliation.documentDetractions.map(
+      d => d.document.id
+    );
+
+    return {
+      ...conciliation,
+      detractionTotal,
+      documentIds,
+    };
+  });
+
   return {
-    data: conciliations,
+    data: enrichedConciliations,
     total,
     page,
     limit,
     totalPages: Math.ceil(total / limit),
   };
 }
-
   async createConciliation(createConciliationDto: CreateConciliationDto) {
-    const { expenses, ...conciliationData } = createConciliationDto
+    const { expenses, detractionIds, ...conciliationData } = createConciliationDto;
 
     // Verify bank account exists and belongs to company
     const bankAccount = await this.prisma.bankAccount.findFirst({
@@ -239,10 +281,10 @@ export class ConciliationsService {
         id: conciliationData.bankAccountId,
         companyId: conciliationData.companyId,
       },
-    })
+    });
 
     if (!bankAccount) {
-      throw new NotFoundException("Bank account not found or doesn't belong to company")
+      throw new NotFoundException("Bank account not found or doesn't belong to company");
     }
 
     // Verify transaction exists if provided
@@ -252,10 +294,30 @@ export class ConciliationsService {
           id: conciliationData.transactionId,
           companyId: conciliationData.companyId,
         },
-      })
+      });
 
       if (!transaction) {
-        throw new NotFoundException("Transaction not found or doesn't belong to company")
+        throw new NotFoundException("Transaction not found or doesn't belong to company");
+      }
+    }
+
+    // For DETRACTIONS type, reset conciliation items counts as they don't apply
+    if (conciliationData.type === ConciliationType.DETRACTIONS) {
+      conciliationData.totalDocuments = 0;
+      conciliationData.conciliatedItems = 0;
+      conciliationData.pendingItems = 0;
+    }
+
+    // Verify detractions exist if provided
+    if (detractionIds && detractionIds.length > 0) {
+      const detractionsCount = await this.prisma.documentDetraction.count({
+        where: {
+          id: { in: detractionIds },
+        },
+      });
+
+      if (detractionsCount !== detractionIds.length) {
+        throw new NotFoundException("One or more detractions not found or don't belong to company");
       }
     }
 
@@ -271,6 +333,11 @@ export class ConciliationsService {
                 ...expense,
                 expenseDate: new Date(expense.expenseDate),
               })),
+            }
+          : undefined,
+        documentDetractions: detractionIds && detractionIds.length > 0
+          ? {
+              connect: detractionIds.map(id => ({ id })),
             }
           : undefined,
       },
@@ -289,9 +356,18 @@ export class ConciliationsService {
             email: true,
           },
         },
+        approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
         expenses: true,
+        documentDetractions: true,
       },
-    })
+    });
   }
 
   async getConciliationById(id: string) {

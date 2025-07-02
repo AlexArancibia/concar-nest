@@ -59,10 +59,16 @@ export class DocumentsService {
       }
 
       // Calculate net payable amount
-      const netPayableAmount = new Prisma.Decimal(documentData.total).minus(
-        new Prisma.Decimal(documentData.retentionAmount || 0),
-      )
-      const pendingAmount = netPayableAmount.minus(new Prisma.Decimal(0)) // Initially no conciliated amount
+     const netPayableAmount = new Prisma.Decimal(documentData.total)
+          .minus(new Prisma.Decimal(documentData.retentionAmount || 0));
+
+        // Initially no conciliated amount, but subtract detraction
+        let detractionAmount = new Prisma.Decimal(0);
+        if (detraction) {
+          detractionAmount = new Prisma.Decimal(detraction.amount || 0);
+        }
+
+        const pendingAmount = netPayableAmount.minus(detractionAmount);
 
       this.logger.log(`Calculated amounts - Net payable: ${netPayableAmount}, Pending: ${pendingAmount}`)
 
@@ -190,7 +196,6 @@ export class DocumentsService {
               ...detraction,
               documentId: document.id,
               amount: detractionAmount,
-              pendingAmount: detractionAmount,
               paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null,
             },
           })
@@ -361,9 +366,7 @@ export class DocumentsService {
     let pendingAmount = existingDocument.pendingAmount
 
     if (documentData.total !== undefined) {
-      netPayableAmount = new Prisma.Decimal(documentData.total).minus(
-        new Prisma.Decimal(documentData.retentionAmount || existingDocument.retentionAmount.toNumber()),
-      )
+      netPayableAmount = new Prisma.Decimal(documentData.total)
       pendingAmount = netPayableAmount.minus(existingDocument.conciliatedAmount)
     }
 
@@ -517,10 +520,6 @@ export class DocumentsService {
           update: {
             ...detraction,
             amount: detractionAmount,
-            pendingAmount: new Prisma.Decimal(detractionAmount).minus(
-              (await tx.documentDetraction.findUnique({ where: { documentId: id } }))?.conciliatedAmount ||
-                new Prisma.Decimal(0),
-            ),
             paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null,
             updatedAt: new Date(),
           },
@@ -528,7 +527,6 @@ export class DocumentsService {
             ...detraction,
             documentId: id,
             amount: detractionAmount,
-            pendingAmount: detractionAmount,
             paymentDate: detraction.paymentDate ? new Date(detraction.paymentDate) : null,
           },
         })
