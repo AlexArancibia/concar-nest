@@ -163,42 +163,70 @@ export class SuppliersService {
   }
 
   async updateSupplier(id: string, updateSupplierDto: UpdateSupplierDto): Promise<Supplier> {
-    const { supplierBankAccounts, ...supplierData } = updateSupplierDto
+  const { supplierBankAccounts, ...supplierData } = updateSupplierDto;
 
-    // Check if supplier exists
-    const existingSupplier = await this.prisma.supplier.findUnique({
-      where: { id },
-    })
+  // Check if supplier exists
+  const existingSupplier = await this.prisma.supplier.findUnique({
+    where: { id },
+    include: {
+      supplierBankAccounts: true,
+    },
+  });
 
-    if (!existingSupplier) {
-      throw new NotFoundException(`Supplier with ID ${id} not found`)
-    }
+  if (!existingSupplier) {
+    throw new NotFoundException(`Supplier with ID ${id} not found`);
+  }
 
-    // If document number is being updated, check for conflicts
-    if (supplierData.documentNumber && supplierData.documentNumber !== existingSupplier.documentNumber) {
-      const conflictingSupplier = await this.prisma.supplier.findUnique({
-        where: {
-          companyId_documentNumber: {
-            companyId: existingSupplier.companyId,
-            documentNumber: supplierData.documentNumber,
-          },
+  // If document number is being updated, check for conflicts
+  if (supplierData.documentNumber && supplierData.documentNumber !== existingSupplier.documentNumber) {
+    const conflictingSupplier = await this.prisma.supplier.findUnique({
+      where: {
+        companyId_documentNumber: {
+          companyId: existingSupplier.companyId,
+          documentNumber: supplierData.documentNumber,
         },
-      })
+      },
+    });
 
-      if (conflictingSupplier) {
-        throw new ConflictException(
-          `Supplier with document number ${supplierData.documentNumber} already exists for this company`,
-        )
-      }
+    if (conflictingSupplier) {
+      throw new ConflictException(
+        `Supplier with document number ${supplierData.documentNumber} already exists for this company`,
+      );
     }
+  }
 
-    // Update supplier
-    const supplier = await this.prisma.supplier.update({
+  // Start transaction for atomic operations
+  const supplier = await this.prisma.$transaction(async (prisma) => {
+    // Update supplier basic data
+    const updatedSupplier = await prisma.supplier.update({
       where: { id },
       data: {
         ...supplierData,
         updatedAt: new Date(),
       },
+    });
+
+    // Handle bank accounts if they are provided
+    if (supplierBankAccounts) {
+      // First, delete all existing bank accounts (or you can implement a more sophisticated sync)
+      await prisma.supplierBankAccount.deleteMany({
+        where: { supplierId: id },
+      });
+
+      // Then create the new ones
+      for (const account of supplierBankAccounts) {
+        await prisma.supplierBankAccount.create({
+          data: {
+            ...account,
+            supplierId: id,
+          },
+        });
+      }
+    }
+
+    // Return the updated supplier with all relations
+    return prisma.supplier.findUnique({
+      where: { id },
       include: {
         company: {
           select: { id: true, name: true, ruc: true },
@@ -210,10 +238,11 @@ export class SuppliersService {
           },
         },
       },
-    })
+    });
+  });
 
-    return supplier
-  }
+  return supplier;
+}
 
   async deleteSupplier(id: string): Promise<void> {
     // Check if supplier exists

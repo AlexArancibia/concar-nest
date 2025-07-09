@@ -411,6 +411,28 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
           },
           orderBy: { createdAt: "asc" },
         },
+        documentDetractions: {
+          select: {
+            id: true,
+            amount: true,
+            code: true,
+            document: {
+              select: {
+                id: true,
+                fullNumber: true,
+                issueDate: true,
+                total: true,
+                currency: true,
+                supplier: {
+                  select: {
+                    id: true,
+                    businessName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         createdBy: {
           select: {
             id: true,
@@ -438,66 +460,112 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
   }
 
   async updateConciliation(id: string, updateConciliationDto: UpdateConciliationDto) {
-    const existingConciliation = await this.prisma.conciliation.findUnique({
-      where: { id },
-    })
+  const { detractionIds, ...restData } = updateConciliationDto;
 
-    if (!existingConciliation) {
-      throw new NotFoundException("Conciliation not found")
-    }
-
-    // Prepare update data excluding problematic fields
-    const updateData: any = {}
-
-    const allowedFields = [
-      "reference",
-      "periodStart",
-      "periodEnd",
-      "totalDocuments",
-      "conciliatedItems",
-      "pendingItems",
-      "bankBalance",
-      "bookBalance",
-      "difference",
-      "toleranceAmount",
-      "status",
-      "additionalExpensesTotal",
-      "totalAmount",
-      "paymentDate",
-      "paymentAmount",
-      "notes",
-      "approvedById",
-      "completedAt",
-    ]
-
-    allowedFields.forEach((field) => {
-      if (updateConciliationDto[field] !== undefined) {
-        if (field === "periodStart" || field === "periodEnd" || field === "paymentDate" || field === "completedAt") {
-          updateData[field] = updateConciliationDto[field] ? new Date(updateConciliationDto[field]) : null
-        } else {
-          updateData[field] = updateConciliationDto[field]
-        }
+  // Verificar que la conciliación existe
+  const existingConciliation = await this.prisma.conciliation.findUnique({
+    where: { id },
+    include: {
+      documentDetractions: {
+        select: { id: true }
       }
-    })
+    }
+  });
 
-    updateData.updatedAt = new Date()
-
-    return this.prisma.conciliation.update({
-      where: { id },
-      data: updateData,
-      include: {
-        bankAccount: {
-          include: {
-            bank: true,
-          },
-        },
-        transaction: true,
-        items: true,
-        expenses: true,
-      },
-    })
+  if (!existingConciliation) {
+    throw new NotFoundException("Conciliation not found");
   }
 
+  // Preparar datos para la actualización
+  const updateData: any = {
+    updatedAt: new Date()
+  };
+
+  // Mapear campos permitidos
+  const allowedFields = [
+    "reference", "periodStart", "periodEnd", "totalDocuments",
+    "conciliatedItems", "pendingItems", "bankBalance", "bookBalance",
+    "difference", "toleranceAmount", "status", "additionalExpensesTotal",
+    "totalAmount", "paymentDate", "paymentAmount", "notes",
+    "approvedById", "completedAt"
+  ];
+
+  allowedFields.forEach((field) => {
+    if (restData[field] !== undefined) {
+      if (field.endsWith("Date") || field === "completedAt" || field === "periodStart" || field === "periodEnd") {
+        updateData[field] = restData[field] ? new Date(restData[field]) : null;
+      } else {
+        updateData[field] = restData[field];
+      }
+    }
+  });
+
+  // Manejar actualización de detracciones si se proporcionan
+  let detractionUpdate = {};
+  if (detractionIds !== undefined) {
+    // Verificar que las detracciones existan
+    if (detractionIds.length > 0) {
+      const detractionsCount = await this.prisma.documentDetraction.count({
+        where: {
+          id: { in: detractionIds },
+          document: { companyId: existingConciliation.companyId }
+        }
+      });
+
+      if (detractionsCount !== detractionIds.length) {
+        throw new NotFoundException("One or more detractions not found or don't belong to company");
+      }
+    }
+
+    const currentDetractionIds = existingConciliation.documentDetractions.map(d => d.id);
+    const detractionsToConnect = detractionIds.filter(id => !currentDetractionIds.includes(id));
+    const detractionsToDisconnect = currentDetractionIds.filter(id => !detractionIds.includes(id));
+
+    detractionUpdate = {
+      documentDetractions: {
+        disconnect: detractionsToDisconnect.map(id => ({ id })),
+        connect: detractionsToConnect.map(id => ({ id })),
+      }
+    };
+  }
+
+  // Realizar la actualización
+  return this.prisma.conciliation.update({
+    where: { id },
+    data: {
+      ...updateData,
+      ...detractionUpdate
+    },
+    include: {
+      bankAccount: { include: { bank: true } },
+      transaction: true,
+      items: true,
+      expenses: true,
+      documentDetractions: {
+        select: {
+          id: true,
+          amount: true,
+          code: true,
+          document: {
+            select: {
+              id: true,
+              fullNumber: true,
+              issueDate: true,
+              total: true,
+              currency: true,
+              supplier: {
+                select: {
+                  id: true,
+                  businessName: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
   async deleteConciliation(id: string) {
     const conciliation = await this.prisma.conciliation.findUnique({
       where: { id },
@@ -507,9 +575,9 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
       throw new NotFoundException("Conciliation not found")
     }
 
-    if (conciliation.status === ConciliationStatus.COMPLETED) {
-      throw new BadRequestException("Cannot delete completed conciliation")
-    }
+    // if (conciliation.status === ConciliationStatus.COMPLETED) {
+    //   throw new BadRequestException("Cannot delete completed conciliation")
+    // }
 
     await this.prisma.conciliation.delete({
       where: { id },

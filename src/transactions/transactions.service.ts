@@ -74,6 +74,7 @@ export class TransactionsService {
       skip,
       take: limit,
       include: {
+        conciliations:true,
         bankAccount: {
           include: {
             bank: {

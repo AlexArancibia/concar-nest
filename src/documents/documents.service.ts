@@ -773,12 +773,30 @@ export class DocumentsService {
   private getDocumentIncludes() {
     return {
       supplier: {
+      
         select: {
           id: true,
           businessName: true,
           documentNumber: true,
           documentType: true,
+          supplierBankAccounts:{
+            select:{
+              id:true,
+              bankId:true,
+              accountNumber:true,
+              accountType:true,
+              currency:true,
+              bank:{
+                select:{
+                  name:true,
+                  code:true
+                }
+              }
+            }
+          }
+        
         },
+        
       },
       lines: {
         include: {

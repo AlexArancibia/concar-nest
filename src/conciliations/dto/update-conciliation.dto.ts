@@ -36,10 +36,10 @@ export class UpdateConciliationDto extends PartialType(CreateConciliationDto) {
   @IsEnum(ConciliationStatus)
   status?: ConciliationStatus
 
-  // @IsOptional()
-  // @IsArray()
-  // @IsString({ each: true })
-  //   detractionIds?: string[];
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+   detractionIds?: string[];
 
   @IsOptional()
   @IsDateString()
