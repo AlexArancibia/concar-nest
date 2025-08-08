@@ -19,6 +19,8 @@ import { SunatModule } from './sunat/sunat.module';
 import { AccountingModule } from './accounting/accounting.module';
 import { BanksModule } from './banks/banks.module';
 import { TaxSchemesModule } from "./tax-scheme/tax-scheme.module"
+import { AccountingEntriesModule } from "./accounting-entries/accounting-entries.module"
+import { AccountingEntryTemplatesModule } from "./accounting-entry-templates/accounting-entry-templates.module"
  
 
 @Module({
@@ -53,6 +55,8 @@ import { TaxSchemesModule } from "./tax-scheme/tax-scheme.module"
     AccountingModule,
     BanksModule,
     TaxSchemesModule,
+    AccountingEntriesModule,
+    AccountingEntryTemplatesModule,
   ],
 })
 export class AppModule {}

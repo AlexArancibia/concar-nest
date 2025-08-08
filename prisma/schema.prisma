@@ -176,6 +176,42 @@ enum AuditAction {
 }
 
 // ============================================================================
+// ACCOUNTING ENTRY ENUMS
+// ============================================================================
+
+enum AccountingEntryFilter {
+  INVOICES    // FACTURAS
+  PAYROLL     // RH (Recibo por Honorarios)
+  BOTH        // AMBOS
+}
+
+enum AccountingEntryCurrency {
+  ALL         // TODAS
+  PEN         // Soles
+  USD         // Dólares
+}
+
+enum MovementType {
+  DEBIT       // D (Débito)
+  CREDIT      // H (Crédito)
+}
+
+enum ApplicationType {
+  FIXED_AMOUNT        // MONTO_FIJO
+  PERCENTAGE          // PORCENTAJE
+  TRANSACTION_AMOUNT  // MONTO_TRANSACCION
+}
+
+enum CalculationBase {
+  SUBTOTAL
+  IGV
+  TOTAL
+  RENT
+  TAX
+  OTHER
+}
+
+// ============================================================================
 // CORE MODELS
 // ============================================================================
 
@@ -262,6 +298,10 @@ model Company {
   sunatRhe                 SunatRhe[]
   sunatInvoices            SunatInvoice[]
   expenseCategories        ExpenseCategory[]
+  accountingEntryTemplates AccountingEntryTemplate[]
+  accountingEntryTemplateLines AccountingEntryTemplateLine[]
+  accountingEntries        AccountingEntry[]
+  accountingEntryLines     AccountingEntryLine[]
 
   @@map("companies")
   AuditLog AuditLog[]
@@ -291,6 +331,8 @@ model AccountingAccount {
   documentAccountLinks       DocumentAccountLink[]
   documentLineAccountLinks   DocumentLineAccountLink[]
   conciliationExpenses       ConciliationExpense[]
+  bankAccounts               BankAccount[]
+  accountingEntryTemplateLines AccountingEntryTemplateLine[]
 
   @@unique([companyId, accountCode])
   @@map("accounting_accounts")
@@ -682,23 +724,26 @@ model DocumentLineCostCenterLink {
 // ============================================================================
 
 model BankAccount {
-  id              String          @id @default(dbgenerated("'bkacc_' || substr(gen_random_uuid()::text, 1, 13)"))
-  companyId       String
-  bankId          String
-  accountNumber   String
-  accountType     BankAccountType
-  currency        String
-  alias           String?
-  description     String?
-  isActive        Boolean         @default(true)
-  initialBalance  Decimal         @default(0) @db.Decimal(15, 2)
-  currentBalance  Decimal         @default(0) @db.Decimal(15, 2)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                     String          @id @default(dbgenerated("'bkacc_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId              String
+  bankId                 String
+  accountNumber          String
+  accountType            BankAccountType
+  currency               String
+  alias                  String?
+  description            String?
+  isActive               Boolean         @default(true)
+  initialBalance         Decimal         @default(0) @db.Decimal(15, 2)
+  currentBalance         Decimal         @default(0) @db.Decimal(15, 2)
+  accountingAccountId    String?         // CCCB_banco - Relación con cuenta contable
+  annexCode              String?         // Anexo - Código de anexo
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
 
   // Relations
   company                 Company                   @relation(fields: [companyId], references: [id])
   bank                    Bank                      @relation(fields: [bankId], references: [id])
+  accountingAccount       AccountingAccount?        @relation(fields: [accountingAccountId], references: [id])
   currencyRef             Currency                  @relation(fields: [currency], references: [code])
   transactions            Transaction[]
   conciliations           Conciliation[]
@@ -783,6 +828,7 @@ model Conciliation {
   items           ConciliationItem[]
   expenses        ConciliationExpense[]
   documentDetractions DocumentDetraction[]
+  accountingEntries AccountingEntry[]
 
   @@map("conciliations")
 }
@@ -1032,6 +1078,93 @@ model SunatInvoice {
   @@map("sunat_invoices")
 }
 
+
+// ============================================================================
+// ACCOUNTING ENTRY MODELS
+// ============================================================================
+
+model AccountingEntryTemplate {
+  id                String                    @id @default(dbgenerated("'aet_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId         String
+  templateNumber    String                    // Número de plantilla (código/identificador legible)
+  name              String                    // Nombre descriptivo del template
+  filter            AccountingEntryFilter     // FACTURAS, RH, AMBOS
+  currency          AccountingEntryCurrency   // TODAS, PEN, USD
+  transactionType   String                    // Código de operación: 'PAGO_AGUA', 'ALQUILER', etc.
+  document          String?                   // Referencia a tipo/identificador documental (opcional)
+  condition         Json                      // Reglas complejas en JSON (incluya detalle si aplica)
+  isActive          Boolean                   @default(true)
+  description       String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  // Relations
+  company           Company                   @relation(fields: [companyId], references: [id])
+  lines             AccountingEntryTemplateLine[]
+
+  @@map("accounting_entry_templates")
+}
+
+// Líneas de la plantilla de asientos contables
+model AccountingEntryTemplateLine {
+  id              String              @id @default(dbgenerated("'aetl_' || substr(gen_random_uuid()::text, 1, 13)"))
+  templateId      String
+  companyId       String
+  accountCode     String              // Código de cuenta contable (ej: 1041)
+  movementType    MovementType        // D (Débito), H (Crédito)
+  applicationType ApplicationType     // MONTO_FIJO, PORCENTAJE, MONTO_TRANSACCION
+  calculationBase CalculationBase?    // SUBTOTAL, IGV, TOTAL, RENTA, etc.
+  value           Decimal?            @db.Decimal(14, 2) // Valor fijo o porcentaje
+  executionOrder  Int                 // Orden de ejecución
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  // Relations
+  template        AccountingEntryTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  company         Company                 @relation(fields: [companyId], references: [id])
+  accountingAccount AccountingAccount @relation(fields: [accountCode, companyId], references: [accountCode, companyId])
+
+  @@map("accounting_entry_template_lines")
+}
+
+model AccountingEntry {
+  id                String                @id @default(dbgenerated("'ae_' || substr(gen_random_uuid()::text, 1, 13)"))
+  companyId         String
+  conciliationId    String             // Conciliación origen (obligatorio)
+  status            String              @default("DRAFT") // DRAFT, POSTED, CANCELLED
+  notes             String?
+  metadata          Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  // Relations
+  company           Company             @relation(fields: [companyId], references: [id])
+  conciliation      Conciliation        @relation(fields: [conciliationId], references: [id])
+  lines             AccountingEntryLine[]
+
+  @@map("accounting_entries")
+}
+
+model AccountingEntryLine {
+  id                String                @id @default(dbgenerated("'ael_' || substr(gen_random_uuid()::text, 1, 13)"))
+  entryId           String
+  companyId         String
+  lineNumber        Int                 // Número de línea dentro del asiento
+  accountCode       String              // Código de cuenta contable
+  movementType      MovementType        // D (Débito), H (Crédito)
+  amount            Decimal             @db.Decimal(15, 2) // Monto de la línea
+  description       String?             // Descripción específica de la línea
+  auxiliaryCode     String?             // Código auxiliar/anexo
+  documentRef       String?             // Referencia a documento
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  // Relations
+  entry             AccountingEntry     @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  company           Company             @relation(fields: [companyId], references: [id])
+
+  @@map("accounting_entry_lines")
+}
 
 // ============================================================================
 // SYSTEM MODELS
