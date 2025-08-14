@@ -208,6 +208,11 @@ enum CalculationBase {
   TOTAL
   RENT
   TAX
+  RETENTION_AMOUNT
+  DETRACTION_AMOUNT
+  NET_PAYABLE
+  PENDING_AMOUNT
+  CONCILIATED_AMOUNT
   OTHER
 }
 
@@ -733,8 +738,6 @@ model BankAccount {
   alias                  String?
   description            String?
   isActive               Boolean         @default(true)
-  initialBalance         Decimal         @default(0) @db.Decimal(15, 2)
-  currentBalance         Decimal         @default(0) @db.Decimal(15, 2)
   accountingAccountId    String?         // CCCB_banco - Relación con cuenta contable
   annexCode              String?         // Anexo - Código de anexo
   createdAt              DateTime        @default(now())

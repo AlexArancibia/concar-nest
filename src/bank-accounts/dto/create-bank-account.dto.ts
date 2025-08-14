@@ -31,15 +31,5 @@ export class CreateBankAccountDto {
   @IsBoolean()
   isActive?: boolean = true
 
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  initialBalance?: number = 0
 
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Transform(({ value }) => (typeof value === "string" ? Number.parseFloat(value) : value))
-  currentBalance?: number = 0
 }

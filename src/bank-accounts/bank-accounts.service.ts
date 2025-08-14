@@ -41,16 +41,12 @@ export class BankAccountsService {
       companyId,
       bankId,
       currency = "PEN",
-      initialBalance = 0,
-      currentBalance = 0,
       ...rest
     } = createBankAccountDto
 
     return this.prisma.bankAccount.create({
       data: {
         ...rest,
-        initialBalance,
-        currentBalance,
         company: {
           connect: { id: companyId },
         },

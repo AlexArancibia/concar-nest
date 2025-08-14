@@ -21,6 +21,7 @@ import { BanksModule } from './banks/banks.module';
 import { TaxSchemesModule } from "./tax-scheme/tax-scheme.module"
 import { AccountingEntriesModule } from "./accounting-entries/accounting-entries.module"
 import { AccountingEntryTemplatesModule } from "./accounting-entry-templates/accounting-entry-templates.module"
+import { ConcarModule } from "./concar/concar.module"
  
 
 @Module({
@@ -57,6 +58,7 @@ import { AccountingEntryTemplatesModule } from "./accounting-entry-templates/acc
     TaxSchemesModule,
     AccountingEntriesModule,
     AccountingEntryTemplatesModule,
+    ConcarModule,
   ],
 })
 export class AppModule {}

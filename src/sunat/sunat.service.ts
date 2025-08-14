@@ -812,4 +812,104 @@ export class SunatService {
 
     return { imported, duplicates, errors }
   }
+
+  // ============================================================================
+  // SUNAT VALIDATION METHODS
+  // ============================================================================
+
+  async validateDocumentsAgainstSunat(
+    companyId: string,
+    startDate: string,
+    endDate: string,
+    documentNumbers: string[]
+  ) {
+    console.log(`Iniciando validación de ${documentNumbers.length} documentos contra SUNAT`)
+    console.log(`Rango de fechas: ${startDate} a ${endDate}`)
+    
+    const results = []
+    let found = 0
+    let notFound = 0
+    let errors = 0
+
+    for (let i = 0; i < documentNumbers.length; i++) {
+      const documentNumber = documentNumbers[i]
+      
+      // Log de progreso cada 100 documentos
+      if ((i + 1) % 100 === 0 || i === documentNumbers.length - 1) {
+        console.log(`Progreso: ${i + 1}/${documentNumbers.length} documentos procesados`)
+      }
+      
+      try {
+        // Buscar en facturas SUNAT
+        const invoice = await this.prisma.sunatInvoice.findFirst({
+          where: {
+            companyId,
+            documentNumber,
+            issueDate: {
+              gte: new Date(startDate),
+              lte: new Date(endDate)
+            }
+          }
+        })
+
+        if (invoice) {
+          results.push({
+            documentNumber,
+            found: true,
+            sunatSource: "invoice" as const,
+            sunatData: invoice
+          })
+          found++
+          continue
+        }
+
+        // Buscar en RHE SUNAT
+        const rhe = await this.prisma.sunatRhe.findFirst({
+          where: {
+            companyId,
+            documentNumber,
+            issueDate: {
+              gte: new Date(startDate),
+              lte: new Date(endDate)
+            }
+          }
+        })
+
+        if (rhe) {
+          results.push({
+            documentNumber,
+            found: true,
+            sunatSource: "rhe" as const,
+            sunatData: rhe
+          })
+          found++
+        } else {
+          results.push({
+            documentNumber,
+            found: false
+          })
+          notFound++
+        }
+      } catch (error) {
+        results.push({
+          documentNumber,
+          found: false,
+          error: error.message
+        })
+        errors++
+      }
+    }
+
+    console.log(`Validación completada: ${found} encontrados, ${notFound} no encontrados, ${errors} errores`)
+    
+    return {
+      results,
+      summary: {
+        total: documentNumbers.length,
+        found,
+        notFound,
+        errors
+      }
+    }
+  }
 }
