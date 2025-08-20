@@ -11,12 +11,30 @@ export class SuppliersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async fetchSuppliers(companyId: string, pagination: PaginationDto): Promise<PaginatedResponse<Supplier>> {
-    const { page = 1, limit = 10 } = pagination
+    const { page = 1, limit = 10, search } = pagination
     const skip = (page - 1) * limit
 
+    console.log('🔍 Search params:', { companyId, search, page, limit })
+
     // Build where clause
-    const where = {
+    const where: Prisma.SupplierWhereInput = {
       companyId,
+    }
+
+    // Add search functionality
+    if (search && search.trim()) {
+      where.OR = [
+        { businessName: { contains: search.trim(), mode: 'insensitive' } },
+        { tradeName: { contains: search.trim(), mode: 'insensitive' } },
+        { documentNumber: { contains: search.trim(), mode: 'insensitive' } },
+        { email: { contains: search.trim(), mode: 'insensitive' } },
+        { phone: { contains: search.trim(), mode: 'insensitive' } },
+        { address: { contains: search.trim(), mode: 'insensitive' } },
+        { district: { contains: search.trim(), mode: 'insensitive' } },
+        { province: { contains: search.trim(), mode: 'insensitive' } },
+        { department: { contains: search.trim(), mode: 'insensitive' } },
+      ]
+      console.log('🔍 Search where clause:', JSON.stringify(where, null, 2))
     }
 
     // Execute queries in parallel
@@ -47,6 +65,8 @@ export class SuppliersService {
       }),
       this.prisma.supplier.count({ where }),
     ])
+
+    console.log('🔍 Search results:', { total, returned: suppliers.length })
 
     const totalPages = Math.ceil(total / limit)
 
@@ -502,6 +522,152 @@ export class SuppliersService {
       page,
       limit,
       totalPages,
+    }
+  }
+
+  async exportSuppliers(
+    companyId: string,
+    format: 'csv' | 'excel',
+    filters?: any
+  ): Promise<{ data: string | Buffer; filename: string }> {
+    // Build where clause based on filters
+    const where: Prisma.SupplierWhereInput = { companyId }
+    
+    if (filters?.status && filters.status !== 'all') {
+      where.status = filters.status as SupplierStatus
+    }
+    
+    if (filters?.supplierType && filters.supplierType !== 'all') {
+      where.supplierType = filters.supplierType as SupplierType
+    }
+    
+    if (filters?.documentType && filters.documentType !== 'all') {
+      where.documentType = filters.documentType
+    }
+    
+    if (filters?.search) {
+      where.OR = [
+        { businessName: { contains: filters.search, mode: 'insensitive' } },
+        { tradeName: { contains: filters.search, mode: 'insensitive' } },
+        { documentNumber: { contains: filters.search, mode: 'insensitive' } },
+        { email: { contains: filters.search, mode: 'insensitive' } },
+        { phone: { contains: filters.search, mode: 'insensitive' } },
+      ]
+    }
+
+    // Fetch all suppliers matching the filters
+    const suppliers = await this.prisma.supplier.findMany({
+      where,
+      orderBy: { businessName: "asc" },
+      include: {
+        company: {
+          select: { id: true, name: true, ruc: true },
+        },
+      },
+    })
+
+    const timestamp = new Date().toISOString().split('T')[0]
+    const filename = `proveedores_${companyId}_${timestamp}.${format}`
+
+    if (format === 'csv') {
+      // Generate CSV content - only include fields that exist in the database
+      const headers = [
+        'Tipo Documento',
+        'Número Documento',
+        'Razón Social',
+        'Nombre Comercial',
+        'Tipo Proveedor',
+        'Email',
+        'Teléfono',
+        'Dirección',
+        'Distrito',
+        'Provincia',
+        'Departamento',
+        'País',
+        'Estado',
+        'Límite de Crédito',
+        'Términos de Pago',
+        'Categoría Tributaria',
+        'Agente de Retención',
+        'Tasa de Retención'
+      ]
+
+      const csvRows = suppliers.map(supplier => [
+        supplier.documentType,
+        supplier.documentNumber,
+        supplier.businessName,
+        supplier.tradeName || '',
+        supplier.supplierType,
+        supplier.email || '',
+        supplier.phone || '',
+        supplier.address || '',
+        supplier.district || '',
+        supplier.province || '',
+        supplier.department || '',
+        supplier.country || 'PE',
+        supplier.status,
+        supplier.creditLimit?.toString() || '',
+        supplier.paymentTerms?.toString() || '',
+        supplier.taxCategory || '',
+        supplier.isRetentionAgent ? 'Sí' : 'No',
+        supplier.retentionRate?.toString() || ''
+      ])
+
+      const csvContent = [headers, ...csvRows]
+        .map(row => row.map(cell => `"${cell}"`).join(','))
+        .join('\n')
+
+      return { data: csvContent, filename }
+    } else {
+      // For Excel format, we'll return CSV for now
+      // In a production environment, you might want to use a library like exceljs
+      const headers = [
+        'Tipo Documento',
+        'Número Documento',
+        'Razón Social',
+        'Nombre Comercial',
+        'Tipo Proveedor',
+        'Email',
+        'Teléfono',
+        'Dirección',
+        'Distrito',
+        'Provincia',
+        'Departamento',
+        'País',
+        'Estado',
+        'Límite de Crédito',
+        'Términos de Pago',
+        'Categoría Tributaria',
+        'Agente de Retención',
+        'Tasa de Retención'
+      ]
+
+      const csvRows = suppliers.map(supplier => [
+        supplier.documentType,
+        supplier.documentNumber,
+        supplier.businessName,
+        supplier.tradeName || '',
+        supplier.supplierType,
+        supplier.email || '',
+        supplier.phone || '',
+        supplier.address || '',
+        supplier.district || '',
+        supplier.province || '',
+        supplier.department || '',
+        supplier.country || 'PE',
+        supplier.status,
+        supplier.creditLimit?.toString() || '',
+        supplier.paymentTerms?.toString() || '',
+        supplier.taxCategory || '',
+        supplier.isRetentionAgent ? 'Sí' : 'No',
+        supplier.retentionRate?.toString() || ''
+      ])
+
+      const csvContent = [headers, ...csvRows]
+        .map(row => row.map(cell => `"${cell}"`).join(','))
+        .join('\n')
+
+      return { data: csvContent, filename: filename.replace('.excel', '.csv') }
     }
   }
 }

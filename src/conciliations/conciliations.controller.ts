@@ -24,6 +24,7 @@ import { PaginationDto } from "../common/dto/pagination.dto"
 import { ConciliationFiltersDto } from "./dto/conciliation-filters.dto"
 import { ValidateConciliationDto } from "./dto/validate-conciliation.dto"
 import { ConciliationQueryDto } from "./dto/conciliation-query.dto"
+import { BulkDeleteConciliationsDto } from "./dto/bulk-delete-conciliations.dto"
 
 @UseGuards(AuthGuard)
 @Controller("conciliations")
@@ -270,5 +271,24 @@ export class ConciliationsController {
       throw new BadRequestException("Company ID is required")
     }
     return this.conciliationsService.getUnmatchedTransactions(companyId, startDate, endDate, bankAccountId)
+  }
+
+  // NEW ENDPOINTS - Bulk deletion with cascade
+  @Delete("bulk")
+  @HttpCode(HttpStatus.OK)
+  async deleteConciliationsBulk(@Body() bulkDeleteDto: BulkDeleteConciliationsDto) {
+    return this.conciliationsService.deleteConciliationsBulk(bulkDeleteDto.conciliationIds)
+  }
+
+  @Delete("company/:companyId/cleanup")
+  @HttpCode(HttpStatus.OK)
+  async cleanupConciliationsByCompany(
+    @Param("companyId") companyId: string,
+    @Query("status") status?: string
+  ) {
+    if (!companyId) {
+      throw new BadRequestException("Company ID is required")
+    }
+    return this.conciliationsService.cleanupConciliationsByCompany(companyId, status)
   }
 }

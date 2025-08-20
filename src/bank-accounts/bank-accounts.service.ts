@@ -19,6 +19,15 @@ export class BankAccountsService {
           company: {
             select: { id: true, name: true, ruc: true },
           },
+          bank: {
+            select: { id: true, name: true, code: true },
+          },
+          accountingAccount: {
+            select: { id: true, accountCode: true, accountName: true },
+          },
+          currencyRef: {
+            select: { code: true, name: true, symbol: true },
+          },
         },
         orderBy: { accountNumber: "asc" },
         skip,
@@ -41,28 +50,41 @@ export class BankAccountsService {
       companyId,
       bankId,
       currency = "PEN",
+      accountingAccountId,
       ...rest
     } = createBankAccountDto
 
-    return this.prisma.bankAccount.create({
-      data: {
-        ...rest,
-        company: {
-          connect: { id: companyId },
-        },
-        bank: {
-          connect: { id: bankId },
-        },
-        currencyRef: {
-          connect: { code: currency },
-        },
+    const createData: any = {
+      ...rest,
+      company: {
+        connect: { id: companyId },
       },
+      bank: {
+        connect: { id: bankId },
+      },
+      currencyRef: {
+        connect: { code: currency },
+      },
+    }
+
+    // Solo conectar la cuenta contable si se proporciona
+    if (accountingAccountId) {
+      createData.accountingAccount = {
+        connect: { id: accountingAccountId },
+      }
+    }
+
+    return this.prisma.bankAccount.create({
+      data: createData,
       include: {
         company: {
           select: { id: true, name: true, ruc: true },
         },
         bank: {
           select: { id: true, name: true, code: true },
+        },
+        accountingAccount: {
+          select: { id: true, accountCode: true, accountName: true },
         },
         currencyRef: {
           select: { code: true, name: true, symbol: true },
@@ -80,7 +102,7 @@ export class BankAccountsService {
       throw new NotFoundException(`Bank account with ID ${id} not found`)
     }
 
-    const { companyId, bankId, currency, ...rest } = updateBankAccountDto
+    const { companyId, bankId, currency, accountingAccountId, ...rest } = updateBankAccountDto
 
     const updateData: any = {
       ...rest,
@@ -97,6 +119,12 @@ export class BankAccountsService {
     if (currency) {
       updateData.currencyRef = { connect: { code: currency } }
     }
+    if (accountingAccountId) {
+      updateData.accountingAccount = { connect: { id: accountingAccountId } }
+    } else if (accountingAccountId === null) {
+      // Si se envía explícitamente null, desconectar la cuenta contable
+      updateData.accountingAccount = { disconnect: true }
+    }
 
     return this.prisma.bankAccount.update({
       where: { id },
@@ -107,6 +135,9 @@ export class BankAccountsService {
         },
         bank: {
           select: { id: true, name: true, code: true },
+        },
+        accountingAccount: {
+          select: { id: true, accountCode: true, accountName: true },
         },
         currencyRef: {
           select: { code: true, name: true, symbol: true },

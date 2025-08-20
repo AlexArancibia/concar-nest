@@ -31,5 +31,11 @@ export class CreateBankAccountDto {
   @IsBoolean()
   isActive?: boolean = true
 
+  @IsOptional()
+  @IsString()
+  accountingAccountId?: string
 
+  @IsOptional()
+  @IsString()
+  annexCode?: string
 }

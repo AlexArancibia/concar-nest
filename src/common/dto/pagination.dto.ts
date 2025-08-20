@@ -1,4 +1,4 @@
-import { IsOptional, IsPositive, Min } from "class-validator"
+import { IsOptional, IsPositive, Min, IsString } from "class-validator"
 import { Type, Transform } from "class-transformer"
 
 export class PaginationDto {
@@ -13,6 +13,10 @@ export class PaginationDto {
   @Transform(({ value }) => Number.parseInt(value, 10))
   @Min(1)
   limit?: number = 10
+
+  @IsOptional()
+  @IsString()
+  search?: string
 }
 
 export class PaginatedResponse<T> {

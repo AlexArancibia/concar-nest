@@ -579,9 +579,39 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
     //   throw new BadRequestException("Cannot delete completed conciliation")
     // }
 
-    await this.prisma.conciliation.delete({
-      where: { id },
-    })
+    // ELIMINACIÓN EN CASCADA: Eliminar primero todas las entidades dependientes
+    try {
+      // 1. Eliminar asientos contables asociados
+      await this.prisma.accountingEntry.deleteMany({
+        where: { conciliationId: id }
+      })
+
+      // 2. Eliminar items de conciliación
+      await this.prisma.conciliationItem.deleteMany({
+        where: { conciliationId: id }
+      })
+
+      // 3. Eliminar gastos de conciliación
+      await this.prisma.conciliationExpense.deleteMany({
+        where: { conciliationId: id }
+      })
+
+      // 4. Eliminar detracciones de conciliación (si existen)
+      await this.prisma.documentDetraction.updateMany({
+        where: { conciliationId: id },
+        data: { conciliationId: null }
+      })
+
+      // 5. Finalmente, eliminar la conciliación
+      await this.prisma.conciliation.delete({
+        where: { id },
+      })
+
+      console.log(`Conciliation ${id} deleted successfully with cascade deletion`)
+    } catch (error) {
+      console.error(`Error deleting conciliation ${id} with cascade:`, error)
+      throw new BadRequestException(`Error deleting conciliation: ${error.message}`)
+    }
   }
 
   // Conciliation completion and automation
@@ -1270,5 +1300,55 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
     }
 
     return combinations
+  }
+
+  // MÉTODO ADICIONAL: Eliminación masiva en cascada
+  async deleteConciliationsBulk(conciliationIds: string[]) {
+    const results = []
+    
+    for (const id of conciliationIds) {
+      try {
+        await this.deleteConciliation(id)
+        results.push({ id, success: true, message: 'Conciliation deleted successfully' })
+      } catch (error) {
+        results.push({ id, success: false, message: error.message })
+      }
+    }
+    
+    return results
+  }
+
+  // MÉTODO ADICIONAL: Limpieza de conciliaciones por empresa
+  async cleanupConciliationsByCompany(companyId: string, status?: string) {
+    const where: any = { companyId }
+    
+    if (status) {
+      where.status = status
+    }
+    
+    // Obtener todas las conciliaciones que cumplan los criterios
+    const conciliations = await this.prisma.conciliation.findMany({
+      where,
+      select: { id: true }
+    })
+    
+    const conciliationIds = conciliations.map(c => c.id)
+    
+    if (conciliationIds.length === 0) {
+      return { message: 'No conciliations found to cleanup', deleted: 0 }
+    }
+    
+    // Eliminar en cascada todas las conciliaciones encontradas
+    const results = await this.deleteConciliationsBulk(conciliationIds)
+    
+    const successful = results.filter(r => r.success).length
+    const failed = results.filter(r => !r.success).length
+    
+    return {
+      message: `Cleanup completed. ${successful} deleted, ${failed} failed`,
+      deleted: successful,
+      failed: failed,
+      details: results
+    }
   }
 }
