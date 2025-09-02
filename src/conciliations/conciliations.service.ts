@@ -9,10 +9,11 @@ import { UpdateConciliationExpenseDto } from "./dto/update-conciliation-expense.
 import { ConciliationFiltersDto } from "./dto/conciliation-filters.dto"
 import { ConciliationStatus, ConciliationItemStatus, ConciliationType } from "@prisma/client"
 import { ConciliationQueryDto } from "./dto/conciliation-query.dto"
+import { AuditLogsService } from "../audit-logs/audit-logs.service"
 
 @Injectable()
 export class ConciliationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private auditLogsService: AuditLogsService) {}
 
   // Conciliation CRUD operations
 async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQueryDto) {
@@ -321,7 +322,7 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
       }
     }
 
-    return this.prisma.conciliation.create({
+    const conciliation = await this.prisma.conciliation.create({
       data: {
         ...conciliationData,
         periodStart: new Date(conciliationData.periodStart),
@@ -368,6 +369,24 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
         documentDetractions: true,
       },
     });
+
+    // Crear audit log
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: conciliationData.createdById,
+        action: "CREATE",
+        entity: "Conciliation",
+        entityId: conciliation.id,
+        description: `Conciliación creada (${conciliation.type}) | Ref: ${conciliation.reference || conciliation.id} | Periodo: ${new Date(conciliation.periodStart).toLocaleDateString()} - ${new Date(conciliation.periodEnd).toLocaleDateString()} | Cuenta: ${conciliation.bankAccount?.alias || conciliation.bankAccount?.accountNumber}`,
+        companyId: conciliationData.companyId,
+      })
+    } catch (error) {
+      // No bloquear el flujo por errores de auditoría
+      // eslint-disable-next-line no-console
+      console.error("Error creating audit log for conciliation:", error)
+    }
+
+    return conciliation
   }
 
   async getConciliationById(id: string) {
@@ -608,6 +627,27 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
       })
 
       console.log(`Conciliation ${id} deleted successfully with cascade deletion`)
+
+      // Audit log: eliminación de conciliación
+      try {
+        await this.auditLogsService.createAuditLog({
+          userId: conciliation.createdById,
+          action: "DELETE",
+          entity: "Conciliation",
+          entityId: id,
+          description: `Conciliación eliminada | Ref: ${conciliation.reference || id} | Periodo: ${new Date(conciliation.periodStart).toLocaleDateString()} - ${new Date(conciliation.periodEnd).toLocaleDateString()} | Cuenta: ${conciliation.bankAccountId}`,
+          companyId: conciliation.companyId,
+          oldValues: {
+            id: conciliation.id,
+            reference: conciliation.reference,
+            status: conciliation.status,
+            totalAmount: conciliation.totalAmount,
+          },
+        })
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error("Error creating audit log for conciliation deletion:", error)
+      }
     } catch (error) {
       console.error(`Error deleting conciliation ${id} with cascade:`, error)
       throw new BadRequestException(`Error deleting conciliation: ${error.message}`)
@@ -635,7 +675,7 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
     const totalConciliatedAmount = conciliation.items.reduce((sum, item) => sum + Number(item.conciliatedAmount), 0)
     const totalExpenses = conciliation.expenses.reduce((sum, expense) => sum + Number(expense.amount), 0)
 
-    return this.prisma.conciliation.update({
+    const updated = await this.prisma.conciliation.update({
       where: { id },
       data: {
         status: ConciliationStatus.COMPLETED,
@@ -652,6 +692,25 @@ async fetchConciliations(companyId: string, conciliationQueryDto: ConciliationQu
         expenses: true,
       },
     })
+
+    // Audit log: completar conciliación
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: conciliation.createdBy?.id || conciliation.approvedBy?.id || "system",
+        action: "UPDATE",
+        entity: "Conciliation",
+        entityId: id,
+        description: `Conciliación completada | Ref: ${conciliation.reference || id} | Total: ${updated.totalAmount} | Gastos: ${updated.additionalExpensesTotal}`,
+        companyId: conciliation.companyId,
+        oldValues: { status: conciliation.status },
+        newValues: { status: updated.status },
+      })
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Error creating audit log for conciliation completion:", error)
+    }
+
+    return updated
   }
 
   async performAutomaticConciliation(id: string) {

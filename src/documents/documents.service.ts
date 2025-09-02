@@ -6,12 +6,16 @@ import { UpdateDocumentDto, ConciliateDocumentDto } from "./dto/update-document.
 import { DocumentQueryDto } from "./dto/document-query.dto"
 import { DocumentResponseDto, DocumentSummaryResponseDto } from "./dto/document-response.dto"
 import { DocumentStatus, Prisma as PrismaType } from "@prisma/client"
+import { AuditLogsService } from "../audit-logs/audit-logs.service"
 
 @Injectable()
 export class DocumentsService {
   private readonly logger = new Logger(DocumentsService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogsService: AuditLogsService
+  ) {}
 
   async createDocument(createDocumentDto: CreateDocumentDto): Promise<DocumentResponseDto> {
     this.logger.log(`Creating document: ${createDocumentDto.series}-${createDocumentDto.number}`)
@@ -59,8 +63,20 @@ export class DocumentsService {
       }
 
       // Calculate net payable amount
-     const netPayableAmount = new Prisma.Decimal(documentData.total)
-          .minus(new Prisma.Decimal(documentData.retentionAmount || 0));
+      // Para RH (RECEIPT), el neto a pagar es el SUBTOTAL
+      let netPayableAmount: Prisma.Decimal
+      if (documentData.documentType === "RECEIPT") {
+        netPayableAmount = new Prisma.Decimal(documentData.subtotal)
+        this.logger.log(`RECEIPT: netPayableAmount = subtotal (${documentData.subtotal})`)
+      } else {
+        // Para otros tipos: total menos retención (si aplica)
+        netPayableAmount = new Prisma.Decimal(documentData.total).minus(
+          new Prisma.Decimal(documentData.retentionAmount || 0),
+        )
+        this.logger.log(
+          `Documento normal: netPayableAmount = total (${documentData.total}) - retención (${documentData.retentionAmount || 0})`,
+        )
+      }
 
         // Initially no conciliated amount, but subtract detraction
         let detractionAmount = new Prisma.Decimal(0);
@@ -215,6 +231,21 @@ export class DocumentsService {
         }
 
         this.logger.log(`Successfully created and fetched document: ${completeDocument.fullNumber}`)
+
+        // Crear audit log
+        try {
+          await this.auditLogsService.createAuditLog({
+            userId: documentData.createdById,
+            action: "CREATE",
+            entity: "Document",
+            entityId: completeDocument.id,
+            description: `Documento creado: ${completeDocument.fullNumber} - ${completeDocument.supplier?.businessName || 'Sin proveedor'}`,
+            companyId: documentData.companyId,
+          })
+        } catch (error) {
+          this.logger.error("Error creating audit log for document:", error)
+        }
+
         return this.mapToResponseDto(completeDocument)
       })
     } catch (error) {
@@ -361,12 +392,38 @@ export class DocumentsService {
       ...documentData
     } = updateDocumentDto
 
-    // Recalculate amounts if total changed
+    // Recalculate amounts when relevant inputs change
     let netPayableAmount = existingDocument.netPayableAmount
     let pendingAmount = existingDocument.pendingAmount
 
-    if (documentData.total !== undefined) {
-      netPayableAmount = new Prisma.Decimal(documentData.total)
+    const shouldRecalc =
+      documentData.total !== undefined ||
+      documentData.subtotal !== undefined ||
+      documentData.documentType !== undefined ||
+      documentData.hasRetention !== undefined ||
+      documentData.retentionAmount !== undefined
+
+    if (shouldRecalc) {
+      const newType = (documentData.documentType as any) ?? (existingDocument as any).documentType
+      const subtotalDec = new Prisma.Decimal(
+        documentData.subtotal !== undefined ? documentData.subtotal : (existingDocument as any).subtotal,
+      )
+      const totalDec = new Prisma.Decimal(documentData.total !== undefined ? documentData.total : (existingDocument as any).total)
+      const retentionDec = new Prisma.Decimal(
+        documentData.retentionAmount !== undefined
+          ? documentData.retentionAmount
+          : (existingDocument as any).retentionAmount || 0,
+      )
+
+      if (newType === "RECEIPT") {
+        netPayableAmount = subtotalDec
+        this.logger.log(`Actualización RECEIPT: netPayableAmount = subtotal (${subtotalDec.toString()})`)
+      } else {
+        netPayableAmount = totalDec.minus(retentionDec)
+        this.logger.log(
+          `Actualización documento normal: netPayableAmount = total (${totalDec.toString()}) - retención (${retentionDec.toString()})`,
+        )
+      }
       pendingAmount = netPayableAmount.minus(existingDocument.conciliatedAmount)
     }
 
@@ -549,6 +606,9 @@ export class DocumentsService {
   async deleteDocument(id: string): Promise<void> {
     const document = await this.prisma.document.findUnique({
       where: { id },
+      include: {
+        conciliationItems: true,
+      },
     })
 
     if (!document) {
@@ -560,9 +620,105 @@ export class DocumentsService {
       throw new BadRequestException("Cannot delete paid or conciliated documents")
     }
 
+    // Verificar si tiene items de conciliación asociados
+    if (document.conciliationItems && document.conciliationItems.length > 0) {
+      console.log(`Document ${id} has ${document.conciliationItems.length} associated conciliation items. Processing them first.`)
+      
+      // Agrupar items por conciliación para eliminar las conciliaciones completas
+      const conciliationIds = [...new Set(document.conciliationItems.map(item => item.conciliationId))]
+      
+      for (const conciliationId of conciliationIds) {
+        try {
+          // Verificar si la conciliación solo tiene este documento
+          const conciliation = await this.prisma.conciliation.findUnique({
+            where: { id: conciliationId },
+            include: {
+              items: true,
+              expenses: true,
+              accountingEntries: true,
+            },
+          })
+
+          if (conciliation) {
+            // Si la conciliación solo tiene este documento y no tiene gastos, eliminarla completamente
+            const hasOtherDocuments = conciliation.items.some(item => item.documentId !== id)
+            const hasExpenses = conciliation.expenses.length > 0
+
+            if (!hasOtherDocuments && !hasExpenses) {
+              console.log(`Conciliation ${conciliationId} only contains this document. Deleting it completely.`)
+              
+              // Eliminar asientos contables asociados
+              await this.prisma.accountingEntry.deleteMany({
+                where: { conciliationId: conciliationId }
+              })
+
+              // Eliminar items de conciliación
+              await this.prisma.conciliationItem.deleteMany({
+                where: { conciliationId: conciliationId }
+              })
+
+              // Eliminar gastos de conciliación
+              await this.prisma.conciliationExpense.deleteMany({
+                where: { conciliationId: conciliationId }
+              })
+
+              // Eliminar detracciones de conciliación (si existen)
+              await this.prisma.documentDetraction.updateMany({
+                where: { conciliationId: conciliationId },
+                data: { conciliationId: null }
+              })
+
+              // Finalmente, eliminar la conciliación
+              await this.prisma.conciliation.delete({
+                where: { id: conciliationId },
+              })
+
+              console.log(`Conciliation ${conciliationId} deleted successfully`)
+            } else {
+              // Si la conciliación tiene otros documentos o gastos, solo eliminar los items de este documento
+              console.log(`Conciliation ${conciliationId} has other items. Only removing items for this document.`)
+              await this.prisma.conciliationItem.deleteMany({
+                where: { 
+                  conciliationId: conciliationId,
+                  documentId: id 
+                }
+              })
+            }
+          }
+        } catch (error) {
+          console.error(`Error processing conciliation ${conciliationId}:`, error)
+          throw new BadRequestException(`Error processing associated conciliation: ${error.message}`)
+        }
+      }
+    }
+
+    // Ahora eliminar el documento
     await this.prisma.document.delete({
       where: { id },
     })
+
+    console.log(`Document ${id} deleted successfully with cascade deletion`)
+
+    // Crear audit log de eliminación
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: document.updatedById || document.createdById,
+        action: "DELETE",
+        entity: "Document",
+        entityId: id,
+        description: `Documento eliminado | ${document.fullNumber} | Proveedor: ${document.supplierId} | Fecha: ${new Date(document.issueDate).toLocaleDateString()} | Total: ${document.total}`,
+        companyId: document.companyId,
+        oldValues: {
+          id: document.id,
+          fullNumber: document.fullNumber,
+          total: document.total,
+          status: document.status,
+        },
+      })
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Error creating audit log for document deletion:", error)
+    }
   }
 
   async getDocumentsByStatus(companyId: string, status: DocumentStatus) {
@@ -617,6 +773,23 @@ export class DocumentsService {
       include: this.getDocumentIncludes(),
     })
 
+    // Crear audit log de cambio de estado
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: updatedById,
+        action: "UPDATE",
+        entity: "Document",
+        entityId: id,
+        description: `Documento actualizado (estado) | ${updatedDocument.fullNumber} | ${document.status} -> ${status}`,
+        companyId: document.companyId,
+        oldValues: { status: document.status },
+        newValues: { status },
+      })
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Error creating audit log for document status update:", error)
+    }
+
     return this.mapToResponseDto(updatedDocument)
   }
 
@@ -646,6 +819,31 @@ export class DocumentsService {
       },
       include: this.getDocumentIncludes(),
     })
+
+    // Crear audit log de conciliación del documento
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: document.updatedById,
+        action: "UPDATE",
+        entity: "Document",
+        entityId: id,
+        description: `Documento conciliado | ${updatedDocument.fullNumber} | Conciliado: ${newConciliatedAmount.toString()} | Pendiente: ${newPendingAmount.toString()} | Estado: ${updatedDocument.status}`,
+        companyId: document.companyId,
+        oldValues: {
+          conciliatedAmount: document.conciliatedAmount,
+          pendingAmount: document.pendingAmount,
+          status: document.status,
+        },
+        newValues: {
+          conciliatedAmount: newConciliatedAmount,
+          pendingAmount: newPendingAmount,
+          status: updatedDocument.status,
+        },
+      })
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("Error creating audit log for document conciliation:", error)
+    }
 
     return this.mapToResponseDto(updatedDocument)
   }

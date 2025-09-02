@@ -37,7 +37,13 @@ export class SunatController {
   // ============================================================================
 
   @Get("rhe/company/:companyId")
-  async fetchSunatRhe(@Param("companyId") companyId: string, @Query() pagination: PaginationDto) {
+  async fetchSunatRhe(
+    @Param("companyId") companyId: string, 
+    @Query() pagination: PaginationDto
+  ) {
+    if (pagination.search) {
+      return this.sunatService.searchSunatRhe(companyId, pagination.search, pagination)
+    }
     return this.sunatService.fetchSunatRhe(companyId, pagination)
   }
 
@@ -102,7 +108,13 @@ export class SunatController {
   // ============================================================================
 
   @Get("invoices/company/:companyId")
-  async fetchSunatInvoices(@Param("companyId") companyId: string, @Query() pagination: PaginationDto) {
+  async fetchSunatInvoices(
+    @Param("companyId") companyId: string, 
+    @Query() pagination: PaginationDto
+  ) {
+    if (pagination.search) {
+      return this.sunatService.searchSunatInvoices(companyId, pagination.search, pagination)
+    }
     return this.sunatService.fetchSunatInvoices(companyId, pagination)
   }
 

@@ -12,7 +12,9 @@ import {
   UseGuards,
   UploadedFile,
   UseInterceptors,
+  Req,
 } from "@nestjs/common"
+import { Request } from "express"
 import { FileInterceptor } from "@nestjs/platform-express"
 import { AuthGuard } from "src/auth/guards/auth.guard"
 import { TransactionsService } from "./transactions.service"
@@ -33,8 +35,10 @@ export class TransactionsController {
   }
 
   @Post()
-  async createTransaction(@Body() createTransactionDto: CreateTransactionDto) {
-    return this.transactionsService.createTransaction(createTransactionDto)
+  async createTransaction(@Body() createTransactionDto: CreateTransactionDto, @Req() req: Request) {
+    const user = (req as any)["user"]
+    const userId = user?.sub || user?.id || "system"
+    return this.transactionsService.createTransaction(createTransactionDto, userId)
   }
 
   @Post("import")
@@ -57,14 +61,18 @@ export class TransactionsController {
   }
 
   @Patch(":id")
-  async updateTransaction(@Param("id") id: string, @Body() updateTransactionDto: UpdateTransactionDto) {
-    return this.transactionsService.updateTransaction(id, updateTransactionDto)
+  async updateTransaction(@Param("id") id: string, @Body() updateTransactionDto: UpdateTransactionDto, @Req() req: Request) {
+    const user = (req as any)["user"]
+    const userId = user?.sub || user?.id || "system"
+    return this.transactionsService.updateTransaction(id, updateTransactionDto, userId)
   }
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteTransaction(@Param("id") id: string) {
-    await this.transactionsService.deleteTransaction(id)
+  async deleteTransaction(@Param("id") id: string, @Req() req: Request) {
+    const user = (req as any)["user"]
+    const userId = user?.sub || user?.id || "system"
+    await this.transactionsService.deleteTransaction(id, userId)
   }
 
   @Get("bank-account/:bankAccountId")

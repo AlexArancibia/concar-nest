@@ -1,15 +1,19 @@
 import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common"
-import  { PrismaService } from "../prisma/prisma.service"
-import  { CreateTransactionDto } from "./dto/create-transaction.dto"
-import  { UpdateTransactionDto } from "./dto/update-transaction.dto"
-import  { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
-import  { Prisma, Transaction, TransactionStatus } from "@prisma/client"
-import { createHash } from "crypto"
+import { PrismaService } from "../prisma/prisma.service"
+import { CreateTransactionDto } from "./dto/create-transaction.dto"
+import { UpdateTransactionDto } from "./dto/update-transaction.dto"
 import { TransactionQueryDto } from "./dto/transaction-query.dto"
+import { Transaction, TransactionStatus, TransactionType, Prisma } from "@prisma/client"
+import { createHash } from "crypto"
+import { AuditLogsService } from "../audit-logs/audit-logs.service"
+import { PaginationDto, PaginatedResponse } from "../common/dto/pagination.dto"
 
 @Injectable()
 export class TransactionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogsService: AuditLogsService
+  ) {}
 
  async fetchTransactions(
   companyId: string,
@@ -109,7 +113,7 @@ export class TransactionsService {
   };
 }
 
-  async createTransaction(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
+  async createTransaction(createTransactionDto: CreateTransactionDto, userIdForAudit?: string): Promise<Transaction> {
     const { companyId, bankAccountId, transactionDate, description, transactionType, amount, balance, ...otherFields } =
       createTransactionDto
 
@@ -170,7 +174,7 @@ export class TransactionsService {
 
     console.log("✅ DEBUG - Creating new transaction with hash:", transactionHash)
 
-    return this.prisma.transaction.create({
+    const transaction = await this.prisma.transaction.create({
       data: {
         companyId,
         bankAccountId,
@@ -193,6 +197,22 @@ export class TransactionsService {
         },
       },
     })
+
+    // Crear audit log
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: userIdForAudit || "system",
+        action: "CREATE",
+        entity: "Transaction",
+        entityId: transaction.id,
+        description: `Transacción creada | ${transaction.transactionType} | ${description} | Fecha: ${new Date(transaction.transactionDate).toLocaleDateString()} | Monto: ${amount}`,
+        companyId,
+      })
+    } catch (error) {
+      console.error("Error creating audit log for transaction:", error)
+    }
+
+    return transaction
   }
 
   async importTransactionsFromFile(
@@ -277,7 +297,7 @@ export class TransactionsService {
     return transaction
   }
 
-  async updateTransaction(id: string, updateTransactionDto: UpdateTransactionDto): Promise<Transaction> {
+  async updateTransaction(id: string, updateTransactionDto: UpdateTransactionDto, userIdForAudit?: string): Promise<Transaction> {
     const existingTransaction = await this.prisma.transaction.findUnique({
       where: { id },
     })
@@ -297,7 +317,7 @@ export class TransactionsService {
       updateData.valueDate = new Date(updateTransactionDto.valueDate)
     }
 
-    return this.prisma.transaction.update({
+    const updatedTransaction = await this.prisma.transaction.update({
       where: { id },
       data: updateData,
       include: {
@@ -309,20 +329,100 @@ export class TransactionsService {
         },
       },
     })
+
+    // Crear audit log
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: userIdForAudit || "system",
+        action: "UPDATE",
+        entity: "Transaction",
+        entityId: existingTransaction.id,
+        description: `Transacción actualizada | ${existingTransaction.description} (${existingTransaction.transactionType})`,
+        oldValues: existingTransaction,
+        newValues: updatedTransaction,
+        companyId: existingTransaction.companyId,
+      })
+    } catch (error) {
+      console.error("Error creating audit log for transaction update:", error)
+    }
+
+    return updatedTransaction
   }
 
-  async deleteTransaction(id: string): Promise<void> {
+  async deleteTransaction(id: string, userIdForAudit?: string): Promise<void> {
     const transaction = await this.prisma.transaction.findUnique({
       where: { id },
+      include: {
+        conciliations: true,
+      },
     })
 
     if (!transaction) {
       throw new NotFoundException("Transaction not found")
     }
 
+    // Verificar si tiene conciliaciones asociadas
+    if (transaction.conciliations && transaction.conciliations.length > 0) {
+      console.log(`Transaction ${id} has ${transaction.conciliations.length} associated conciliations. Deleting them first.`)
+      
+      // Eliminar en cascada todas las conciliaciones asociadas
+      for (const conciliation of transaction.conciliations) {
+        try {
+          // Eliminar asientos contables asociados
+          await this.prisma.accountingEntry.deleteMany({
+            where: { conciliationId: conciliation.id }
+          })
+
+          // Eliminar items de conciliación
+          await this.prisma.conciliationItem.deleteMany({
+            where: { conciliationId: conciliation.id }
+          })
+
+          // Eliminar gastos de conciliación
+          await this.prisma.conciliationExpense.deleteMany({
+            where: { conciliationId: conciliation.id }
+          })
+
+          // Eliminar detracciones de conciliación (si existen)
+          await this.prisma.documentDetraction.updateMany({
+            where: { conciliationId: conciliation.id },
+            data: { conciliationId: null }
+          })
+
+          // Finalmente, eliminar la conciliación
+          await this.prisma.conciliation.delete({
+            where: { id: conciliation.id },
+          })
+
+          console.log(`Conciliation ${conciliation.id} deleted successfully`)
+        } catch (error) {
+          console.error(`Error deleting conciliation ${conciliation.id}:`, error)
+          throw new BadRequestException(`Error deleting associated conciliation: ${error.message}`)
+        }
+      }
+    }
+
+    // Crear audit log antes de eliminar
+    try {
+      await this.auditLogsService.createAuditLog({
+        userId: userIdForAudit || "system",
+        action: "DELETE",
+        entity: "Transaction",
+        entityId: transaction.id,
+        description: `Transacción eliminada | ${transaction.transactionType} | ${transaction.description} | Fecha: ${new Date(transaction.transactionDate).toLocaleDateString()} | Monto: ${transaction.amount}`,
+        oldValues: transaction,
+        companyId: transaction.companyId,
+      })
+    } catch (error) {
+      console.error("Error creating audit log for transaction deletion:", error)
+    }
+
+    // Ahora eliminar la transacción
     await this.prisma.transaction.delete({
       where: { id },
     })
+
+    console.log(`Transaction ${id} deleted successfully with cascade deletion`)
   }
 
   async getTransactionsByBankAccount(bankAccountId: string): Promise<Transaction[]> {

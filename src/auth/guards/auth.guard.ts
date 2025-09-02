@@ -26,6 +26,8 @@ export class AuthGuard implements CanActivate {
 
       })
 
+      // Adjuntar usuario al request para auditoría
+      request["user"] = payload
       return true
 
 
