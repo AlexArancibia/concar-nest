@@ -63,28 +63,17 @@ export class DocumentsService {
       }
 
       // Calculate net payable amount
-      // Para RH (RECEIPT), el neto a pagar es el SUBTOTAL
+      // El monto neto a pagar = subtotal - detracción - retención
+      const subtotalDec = new Prisma.Decimal(documentData.subtotal)
+      const detractionAmount = detraction ? new Prisma.Decimal(detraction.amount || 0) : new Prisma.Decimal(0)
+      const retentionAmount = new Prisma.Decimal(documentData.retentionAmount || 0)
+      
       let netPayableAmount: Prisma.Decimal
-      if (documentData.documentType === "RECEIPT") {
-        netPayableAmount = new Prisma.Decimal(documentData.subtotal)
-        this.logger.log(`RECEIPT: netPayableAmount = subtotal (${documentData.subtotal})`)
-      } else {
-        // Para otros tipos: total menos retención (si aplica)
-        netPayableAmount = new Prisma.Decimal(documentData.total).minus(
-          new Prisma.Decimal(documentData.retentionAmount || 0),
-        )
-        this.logger.log(
-          `Documento normal: netPayableAmount = total (${documentData.total}) - retención (${documentData.retentionAmount || 0})`,
-        )
-      }
+      netPayableAmount = subtotalDec.minus(detractionAmount).minus(retentionAmount)
+      this.logger.log(`netPayableAmount = subtotal (${subtotalDec}) - detracción (${detractionAmount}) - retención (${retentionAmount}) = ${netPayableAmount}`)
 
         // Initially no conciliated amount, but subtract detraction
-        let detractionAmount = new Prisma.Decimal(0);
-        if (detraction) {
-          detractionAmount = new Prisma.Decimal(detraction.amount || 0);
-        }
-
-        const pendingAmount = netPayableAmount.minus(detractionAmount);
+        const pendingAmount = netPayableAmount.minus(new Prisma.Decimal(0));
 
       this.logger.log(`Calculated amounts - Net payable: ${netPayableAmount}, Pending: ${pendingAmount}`)
 
@@ -415,15 +404,11 @@ export class DocumentsService {
           : (existingDocument as any).retentionAmount || 0,
       )
 
-      if (newType === "RECEIPT") {
-        netPayableAmount = subtotalDec
-        this.logger.log(`Actualización RECEIPT: netPayableAmount = subtotal (${subtotalDec.toString()})`)
-      } else {
-        netPayableAmount = totalDec.minus(retentionDec)
-        this.logger.log(
-          `Actualización documento normal: netPayableAmount = total (${totalDec.toString()}) - retención (${retentionDec.toString()})`,
-        )
-      }
+      // El monto neto a pagar = subtotal - detracción - retención
+      const detractionAmount = detraction ? new Prisma.Decimal(detraction.amount || 0) : new Prisma.Decimal(0)
+      
+      netPayableAmount = subtotalDec.minus(detractionAmount).minus(retentionDec)
+      this.logger.log(`Actualización: netPayableAmount = subtotal (${subtotalDec}) - detracción (${detractionAmount}) - retención (${retentionDec}) = ${netPayableAmount}`)
       pendingAmount = netPayableAmount.minus(existingDocument.conciliatedAmount)
     }
 
