@@ -243,6 +243,105 @@ export class DocumentsService {
     }
   }
 
+  /**
+   * Extrae el número de cuenta de la descripción de una transacción
+   * Patrón: "A [código] [número_cuenta] 0"
+   * Ejemplo: "A 191 71517482 0" → "71517482"
+   */
+  private extractAccountNumberFromDescription(description: string): string | null {
+    if (!description) return null
+    const match = description.match(/^A\s+\d+\s+(\d{8,10})\s+0$/)
+    return match ? match[1] : null
+  }
+
+  /**
+   * Normaliza un número de cuenta para comparación
+   * Elimina guiones, espacios y otros caracteres especiales
+   */
+  private normalizeAccountNumber(accountNumber: string): string {
+    if (!accountNumber) return ''
+    return accountNumber.replace(/[-\s]/g, '')
+  }
+
+  /**
+   * Compara dos números de cuenta (normalizados)
+   * Retorna true si coinciden completamente o parcialmente
+   */
+  private matchAccountNumbers(account1: string, account2: string): boolean {
+    const normalized1 = this.normalizeAccountNumber(account1)
+    const normalized2 = this.normalizeAccountNumber(account2)
+    
+    if (!normalized1 || !normalized2) return false
+    
+    // Match exacto
+    if (normalized1 === normalized2) return true
+    
+    // Match parcial: si uno contiene al otro (mínimo 6 dígitos)
+    const minLength = Math.min(normalized1.length, normalized2.length)
+    if (minLength >= 6) {
+      return normalized1.includes(normalized2) || normalized2.includes(normalized1)
+    }
+    
+    return false
+  }
+
+  /**
+   * Calcula la probabilidad de coincidencia entre una transacción y un documento
+   */
+  private calculateMatchProbability(
+    transaction: any,
+    document: any,
+    tolerance: number = 5,
+    dateRange: number = 30
+  ): number {
+    let score = 0
+    const maxScore = 10
+    
+    // 1. Coincidencia de monto (peso: 3 puntos)
+    const transAmount = Number(transaction.amount)
+    const pendingAmount = Number(document.pendingAmount || 0)
+    const amountDiff = Math.abs(transAmount - pendingAmount)
+    
+    if (amountDiff === 0) {
+      score += 3
+    } else if (amountDiff <= tolerance) {
+      score += 2.5 - (amountDiff / tolerance) * 0.5
+    } else if (amountDiff <= tolerance * 2) {
+      score += 1
+    }
+    
+    // 2. Coincidencia de número de cuenta (peso: 5 puntos) - MUY FUERTE
+    const transactionAccountNumber = this.extractAccountNumberFromDescription(transaction.description)
+    if (transactionAccountNumber && document.supplier?.supplierBankAccounts) {
+      const hasAccountMatch = document.supplier.supplierBankAccounts.some((sba: any) =>
+        this.matchAccountNumbers(transactionAccountNumber, sba.accountNumber)
+      )
+      if (hasAccountMatch) score += 5
+    }
+    
+    // 3. Coincidencia de fecha (peso: 1.5 puntos)
+    const transDate = new Date(transaction.transactionDate)
+    const docDate = new Date(document.dueDate || document.issueDate)
+    const dateDiff = Math.abs(transDate.getTime() - docDate.getTime()) / (1000 * 60 * 60 * 24)
+    
+    if (dateDiff <= 7) {
+      score += 1.5
+    } else if (dateDiff <= dateRange) {
+      score += 1.5 * (1 - (dateDiff - 7) / (dateRange - 7))
+    }
+    
+    // 4. Coincidencia de proveedor en descripción (peso: 0.5 puntos)
+    if (document.supplier?.businessName && transaction.description) {
+      const supplierName = document.supplier.businessName.toLowerCase()
+      const transDesc = transaction.description.toLowerCase()
+      if (supplierName.includes(transDesc) || transDesc.includes(supplierName)) {
+        score += 0.5
+      }
+    }
+    
+    return Math.min(score / maxScore, 1.0)
+  }
+
   async fetchDocuments(companyId: string, query: DocumentQueryDto) {
     const {
       page = 1,
@@ -265,6 +364,7 @@ export class DocumentsService {
       hasDigitalSignature,
       accountId,
       costCenterId,
+      transactionId,
     } = query
 
     const skip = (page - 1) * limit
@@ -318,24 +418,82 @@ export class DocumentsService {
       }),
     }
 
+    // Si se proporciona transactionId, obtener la transacción y calcular probabilidades
+    let transaction: any = null
+    if (transactionId) {
+      try {
+        transaction = await this.prisma.transaction.findUnique({
+          where: { id: transactionId },
+          include: {
+            bankAccount: {
+              include: {
+                bank: true,
+                currencyRef: true,
+              },
+            },
+          },
+        })
+        
+        if (!transaction) {
+          throw new NotFoundException(`Transaction with ID ${transactionId} not found`)
+        }
+        
+        // Validar que la transacción pertenezca a la misma compañía
+        if (transaction.companyId !== companyId) {
+          throw new BadRequestException("Transaction does not belong to the specified company")
+        }
+      } catch (error) {
+        if (error instanceof NotFoundException || error instanceof BadRequestException) {
+          throw error
+        }
+        // Si hay otro error, continuar sin ordenamiento por probabilidad
+        this.logger.warn(`Error fetching transaction ${transactionId}: ${error.message}`)
+      }
+    }
+
+    // Si hay transacción, necesitamos traer más documentos para calcular probabilidades
+    // y luego ordenar en memoria. Usamos un límite mayor para tener más opciones.
+    const maxDocumentsForMatching = transactionId ? Math.max(limit * 10, 1000) : limit
+
     const [documents, total] = await Promise.all([
       this.prisma.document.findMany({
         where,
         include: this.getDocumentIncludes(),
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
+        // Si no hay transactionId, ordenar por fecha de creación
+        orderBy: transactionId ? undefined : { createdAt: "desc" },
+        // Si hay transactionId, traer más documentos para calcular probabilidades
+        skip: transactionId ? 0 : skip,
+        take: transactionId ? maxDocumentsForMatching : limit,
       }),
       this.prisma.document.count({ where }),
     ])
 
-    return {
-      data: documents.map((doc) => this.mapToResponseDto(doc)),
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+    // Si hay transacción, calcular probabilidades y ordenar
+    let documentsWithProbability = documents
+    if (transaction) {
+      documentsWithProbability = documents
+        .map((doc) => ({
+          ...doc,
+          matchProbability: this.calculateMatchProbability(transaction, doc),
+        }))
+        .sort((a, b) => b.matchProbability - a.matchProbability)
+        .slice(skip, skip + limit)
+    }
 
+    return {
+      data: documentsWithProbability.map((doc) => this.mapToResponseDto(doc)),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      // Incluir información de la transacción si se usó para ordenar
+      ...(transaction && {
+        sortedBy: {
+          transactionId: transaction.id,
+          transactionAmount: transaction.amount.toString(),
+          transactionDescription: transaction.description,
+        },
+      }),
     }
   }
 
@@ -1036,8 +1194,8 @@ export class DocumentsService {
     }
   }
 
-  private mapToResponseDto(document: any): DocumentResponseDto {
-    return {
+  private mapToResponseDto(document: any): DocumentResponseDto & { matchProbability?: number } {
+    const dto: DocumentResponseDto & { matchProbability?: number } = {
       id: document.id,
       companyId: document.companyId,
       documentType: document.documentType,
@@ -1084,5 +1242,12 @@ export class DocumentsService {
       digitalSignature: document.digitalSignature,
       detraction: document.detraction,
     }
+
+    // Agregar matchProbability si existe
+    if ('matchProbability' in document && document.matchProbability !== undefined) {
+      dto.matchProbability = document.matchProbability
+    }
+
+    return dto
   }
 }

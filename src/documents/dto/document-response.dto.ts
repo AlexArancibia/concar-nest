@@ -203,6 +203,9 @@ export class DocumentResponseDto {
   xmlData?: DocumentXmlDataResponseDto
   digitalSignature?: DocumentDigitalSignatureResponseDto
   detraction?: DocumentDetractionResponseDto
+
+  // Probabilidad de coincidencia cuando se ordena por transacción
+  matchProbability?: number
 }
 
 export class DocumentSummaryResponseDto {

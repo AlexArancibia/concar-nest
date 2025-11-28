@@ -78,4 +78,9 @@ export class DocumentQueryDto extends PaginationDto {
   @IsOptional()
   @IsString()
   costCenterId?: string
+
+  // ID de transacción para ordenar por probabilidad de coincidencia
+  @IsOptional()
+  @IsString()
+  transactionId?: string
 }

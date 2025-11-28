@@ -338,6 +338,7 @@ model AccountingAccount {
   conciliationExpenses       ConciliationExpense[]
   bankAccounts               BankAccount[]
   accountingEntryTemplateLines AccountingEntryTemplateLine[]
+  accountingEntryLines       AccountingEntryLine[]
 
   @@unique([companyId, accountCode])
   @@map("accounting_accounts")
@@ -1154,7 +1155,7 @@ model AccountingEntryLine {
   companyId         String
   lineNumber        Int                 // Número de línea dentro del asiento
   accountCode       String              // Código de cuenta contable
-  movementType      MovementType        // D (Débito), H (Crédito)
+  movementType      MovementType        // D (Débito/Deber), H (Crédito/Haber)
   amount            Decimal             @db.Decimal(15, 2) // Monto de la línea
   description       String?             // Descripción específica de la línea
   auxiliaryCode     String?             // Código auxiliar/anexo
@@ -1165,6 +1166,7 @@ model AccountingEntryLine {
   // Relations
   entry             AccountingEntry     @relation(fields: [entryId], references: [id], onDelete: Cascade)
   company           Company             @relation(fields: [companyId], references: [id])
+  accountingAccount AccountingAccount   @relation(fields: [accountCode, companyId], references: [accountCode, companyId])
 
   @@map("accounting_entry_lines")
 }

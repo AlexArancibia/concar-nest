@@ -4,6 +4,7 @@ import { AccountingEntriesService } from "src/accounting-entries/accounting-entr
 import { CreateAccountingEntryDto } from "src/accounting-entries/dto/create-accounting-entry.dto"
 import { UpdateAccountingEntryDto } from "src/accounting-entries/dto/update-accounting-entry.dto"
 import { PaginationDto } from "src/common/dto/pagination.dto"
+import { ConcarExportQueryDto } from "src/accounting-entries/dto/concar-export-query.dto"
 
 @UseGuards(AuthGuard)
 @Controller("accounting-entries")
@@ -13,6 +14,11 @@ export class AccountingEntriesController {
   @Get("company/:companyId")
   async fetchEntries(@Param("companyId") companyId: string, @Query() pagination: PaginationDto) {
     return this.service.fetchEntries(companyId, pagination)
+  }
+
+  @Get("concar-export")
+  async exportConcarFormat(@Query() query: ConcarExportQueryDto) {
+    return this.service.exportConcarFormat(query)
   }
 
   @Post()
