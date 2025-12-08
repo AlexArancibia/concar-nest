@@ -159,6 +159,51 @@ export class AccountingEntriesService {
     return filtered.join(separator)
   }
 
+  /**
+   * Helper: Calcula la fecha más repetida (moda) de los documentos
+   * Si hay empate, retorna la fecha más antigua
+   */
+  private getMostFrequentDocumentDate(documents: any[]): Date | null {
+    if (documents.length === 0) return null
+    
+    const dates = documents
+      .map(doc => doc.issueDate)
+      .filter((date): date is Date => date !== null && date !== undefined)
+    
+    if (dates.length === 0) return null
+    
+    // Contar frecuencia de cada fecha (normalizada a día completo, sin hora)
+    const dateCounts = new Map<string, { date: Date; count: number }>()
+    
+    for (const date of dates) {
+      // Normalizar a inicio del día para comparar solo por fecha
+      const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+      const dateKey = normalizedDate.toISOString().split('T')[0]
+      
+      const existing = dateCounts.get(dateKey)
+      if (existing) {
+        existing.count++
+      } else {
+        dateCounts.set(dateKey, { date: normalizedDate, count: 1 })
+      }
+    }
+    
+    // Encontrar la fecha con mayor frecuencia (si hay empate, usar la más antigua)
+    let maxCount = 0
+    let mostFrequentDate: Date | null = null
+    
+    for (const [, { date, count }] of dateCounts) {
+      if (count > maxCount) {
+        maxCount = count
+        mostFrequentDate = date
+      } else if (count === maxCount && mostFrequentDate && date.getTime() < mostFrequentDate.getTime()) {
+        mostFrequentDate = date
+      }
+    }
+    
+    return mostFrequentDate
+  }
+
   async exportConcarFormat(query: ConcarExportQueryDto): Promise<ConcarExportResponseDto> {
     const { companyId, year, month, startDay, endDay, bankAccountIds, conciliationType, documentType } = query
 
@@ -199,16 +244,13 @@ export class AccountingEntriesService {
             some: {
               document: {
                 documentType: documentTypeFilter,
+                // Agregar filtro de fecha aquí si existe (filtra por fecha de emisión del documento)
+                ...(dateFilter ? { issueDate: dateFilter } : {}),
               },
             },
           },
         },
       },
-    }
-
-    // Agregar filtro de fechas solo si se proporcionó
-    if (dateFilter) {
-      whereClause.createdAt = dateFilter
     }
 
     // Obtener todas las AccountingEntryLine que cumplan con los filtros
@@ -259,62 +301,99 @@ export class AccountingEntriesService {
       }
     }
 
-    // Agrupar líneas por AccountingEntry para generar correlativos
-    // Si se proporcionó mes, agrupar por mes también para los correlativos
-    const entriesMap = new Map<string, { entryId: string; lines: typeof lines; correlative: number; month: number }>()
-    
-    // Si hay mes proporcionado, agrupar solo dentro de ese mes
-    // Si no, agrupar por mes de cada entry
-    const entriesByMonth = new Map<string, Map<string, { entryId: string; lines: typeof lines; correlative: number }>>()
-
-    for (const line of lines) {
-      const entryMonth = month ?? line.entry.createdAt.getMonth() + 1
-      const monthKey = `${entryMonth}`
-      
-      if (!entriesByMonth.has(monthKey)) {
-        entriesByMonth.set(monthKey, new Map())
-      }
-      
-      const monthEntries = entriesByMonth.get(monthKey)!
-      if (!monthEntries.has(line.entryId)) {
-        monthEntries.set(line.entryId, {
-          entryId: line.entryId,
-          lines: [],
-          correlative: monthEntries.size + 1,
-        })
-      }
-      monthEntries.get(line.entryId)!.lines.push(line)
+    // Helper: Obtener documentos del tipo filtrado de una conciliación
+    const getFilteredDocuments = (items: any[]) => {
+      return items
+        .filter((item) => item.document && item.document.documentType === documentTypeFilter)
+        .map((item) => item.document!)
     }
 
-    // Convertir a un solo mapa con la información del mes
+    // PASO 1: Agrupar líneas por AccountingEntry y ordenar por lineNumber dentro de cada entry
+    const entriesGrouped = new Map<string, typeof lines>()
+    for (const line of lines) {
+      const entryLines = entriesGrouped.get(line.entryId) || []
+      entryLines.push(line)
+      entriesGrouped.set(line.entryId, entryLines)
+    }
+
+    // Ordenar líneas por lineNumber dentro de cada entry
+    for (const entryLines of entriesGrouped.values()) {
+      entryLines.sort((a, b) => a.lineNumber - b.lineNumber)
+    }
+
+    // PASO 2: Calcular fecha moda para cada AccountingEntry
+    type EntryWithDate = {
+      entryId: string
+      lines: typeof lines
+      documentDate: Date
+      month: number
+    }
+
+    const entriesWithDates: EntryWithDate[] = []
+    
+    for (const [entryId, entryLines] of entriesGrouped) {
+      const firstLine = entryLines[0]
+      const documents = getFilteredDocuments(firstLine.entry.conciliation.items)
+      
+      // Calcular fecha moda (más repetida), o usar createdAt si no hay documentos
+      const mostFrequentDate = this.getMostFrequentDocumentDate(documents)
+      const documentDate = mostFrequentDate || firstLine.entry.createdAt
+      const entryMonth = month ?? documentDate.getMonth() + 1
+      
+      entriesWithDates.push({
+        entryId,
+        lines: entryLines,
+        documentDate,
+        month: entryMonth,
+      })
+    }
+
+    // PASO 3: Ordenar entries por fecha de documento (manteniendo agrupados)
+    entriesWithDates.sort((a, b) => {
+      const dateDiff = a.documentDate.getTime() - b.documentDate.getTime()
+      return dateDiff !== 0 ? dateDiff : a.entryId.localeCompare(b.entryId)
+    })
+
+    // PASO 4: Agrupar por mes y asignar correlativos
+    const entriesByMonth = new Map<string, EntryWithDate[]>()
+    for (const entryData of entriesWithDates) {
+      const monthKey = `${entryData.month}`
+      const monthEntries = entriesByMonth.get(monthKey) || []
+      monthEntries.push(entryData)
+      entriesByMonth.set(monthKey, monthEntries)
+    }
+
+    // Asignar correlativos dentro de cada mes (manteniendo el orden por fecha)
+    const entriesMap = new Map<string, { entryId: string; lines: typeof lines; correlative: number; month: number }>()
     for (const [monthKey, monthEntries] of entriesByMonth) {
-      for (const [, entryData] of monthEntries) {
+      monthEntries.forEach((entryData, index) => {
         entriesMap.set(entryData.entryId, {
-          ...entryData,
+          entryId: entryData.entryId,
+          lines: entryData.lines,
+          correlative: index + 1,
           month: Number.parseInt(monthKey),
         })
-      }
+      })
     }
 
-    // Generar filas de datos
+    // PASO 5: Generar filas de datos en el orden correcto (ordenado por fecha de documento)
     const data: ConcarExportRowDto[] = []
 
-    for (const [, entryData] of entriesMap) {
+    // Iterar sobre entries ordenados por fecha (mantiene agrupados los débitos y haberes)
+    for (const entryData of entriesWithDates) {
+      const entryMapData = entriesMap.get(entryData.entryId)!
       // Todas las líneas del mismo AccountingEntry tienen el mismo correlativo
-      const correlative = String(entryData.correlative).padStart(4, "0")
-      const entryMonthFormatted = String(entryData.month).padStart(2, "0")
+      const correlative = String(entryMapData.correlative).padStart(4, "0")
+      const entryMonthFormatted = String(entryMapData.month).padStart(2, "0")
       const numeroComprobante = `${entryMonthFormatted}${correlative}`
 
-      for (const line of entryData.lines) {
+      for (const line of entryMapData.lines) {
         const entry = line.entry
         const conciliation = entry.conciliation
         const bankAccount = conciliation.bankAccount
-        const items = conciliation.items
 
-        // Filtrar documentos solo del tipo especificado
-        const documents = items
-          .filter((item) => item.document && item.document.documentType === documentTypeFilter)
-          .map((item) => item.document!)
+        // Obtener documentos del tipo filtrado (mostrar TODOS, el filtro de Prisma ya aseguró que al menos uno cumple)
+        const documents = getFilteredDocuments(conciliation.items)
 
         // Columna E: Moneda
         const currencyCode = this.getCurrencyCode(bankAccount.currency)
@@ -368,11 +447,19 @@ export class AccountingEntriesService {
           }
         }
 
+        // Columna D: Fecha del comprobante (concatenar todas las fechas de emisión de documentos)
+        const fechaComprobante = documents.length > 0
+          ? this.concatenateValues(
+              documents.map((doc) => (doc.issueDate ? this.formatDate(doc.issueDate) : "")),
+              "; ",
+            )
+          : this.formatDate(line.createdAt) // Fallback si no hay documentos
+
         const row: ConcarExportRowDto = {
           campo,
           subDiario: documentType,
           numeroComprobante,
-          fechaComprobante: this.formatDate(line.createdAt),
+          fechaComprobante,
           codigoMoneda: currencyCode,
           glosaPrincipal,
           tipoCambio: "",

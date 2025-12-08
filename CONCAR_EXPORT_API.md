@@ -99,7 +99,7 @@ Authorization: Bearer <tu-token-jwt>
 - **Descripción:** Día de fin del rango dentro del mes seleccionado. Solo tiene efecto si se proporcionan todos los parámetros de fecha.
 
 **Importante sobre el filtro de fechas:**
-- El filtro se aplica sobre `AccountingEntryLine.createdAt`
+- El filtro se aplica sobre `Document.issueDate` (fecha de emisión del documento)
 - Si se proporcionan todos los parámetros (`year`, `month`, `startDay`, `endDay`), se filtra por ese rango específico
 - Si no se proporcionan, se obtienen todos los registros que cumplan los otros filtros
 
@@ -171,7 +171,7 @@ Cada objeto en el array `data` contiene 39 campos correspondientes a las columna
 | `campo` | A | string | Identificador único del registro | `{documentType}-{numeroComprobante}` |
 | `subDiario` | B | string | Código del subdiario | Parámetro `documentType` ("15" o "11") |
 | `numeroComprobante` | C | string | Número de comprobante | Formato: `MMNNNN` (mes + correlativo de 4 dígitos) |
-| `fechaComprobante` | D | string | Fecha del comprobante | `AccountingEntryLine.createdAt` (formato: dd/mm/yyyy) |
+| `fechaComprobante` | D | string | Fecha del comprobante | `Document.issueDate` (fecha de emisión del documento, formato: dd/mm/yyyy). Si no hay documentos, usa `AccountingEntryLine.createdAt` como fallback |
 | `codigoMoneda` | E | string | Código de moneda | `BankAccount.currency` ("PEN" → "MN", resto igual) |
 | `glosaPrincipal` | F | string | Descripción principal | `Document.description` (concatenado con "; " si hay múltiples) |
 | `tipoCambio` | G | string | Tipo de cambio | Vacío (pendiente de implementación) |
@@ -213,7 +213,7 @@ El número de comprobante (`numeroComprobante`) sigue el formato `MMNNNN`:
 **Reglas:**
 - Todas las líneas (`AccountingEntryLine`) del mismo `AccountingEntry` comparten el mismo número de comprobante
 - El correlativo se reinicia en 0001 para cada mes
-- Si no se proporciona mes, se usa el mes del `createdAt` de cada entry
+- Si no se proporciona mes, se usa el mes de `Document.issueDate` (fecha de emisión del documento). Si no hay documentos, se usa el mes de `AccountingEntry.createdAt` como fallback
 
 ### Concatenación de Múltiples Documentos
 
@@ -420,7 +420,7 @@ AccountingEntryLine
 
 **Filtros aplicados:**
 - Filtro por `companyId` en `AccountingEntryLine`
-- Filtro por rango de fechas en `AccountingEntryLine.createdAt` (opcional)
+- Filtro por rango de fechas en `Document.issueDate` (opcional) - filtra por fecha de emisión del documento
 - Filtro por `bankAccountId` en `Conciliation`
 - Filtro por `type` en `Conciliation`
 - Filtro por `documentType` en `Document` (a través de `ConciliationItem`)
@@ -457,4 +457,5 @@ AccountingEntryLine
 
 **Versión del endpoint:** 1.0.0  
 **Última actualización:** 2025-01-XX
+
 
